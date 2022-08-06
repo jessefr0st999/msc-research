@@ -8,79 +8,71 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
 
+from helpers import *
+
 # TODO: convert these to command line flags
 DATABASE_URI = 'postgresql+psycopg2://postgres:secret@localhost:5432/msc_research'
-DROP_PCT = 85
-SAVE_LINKS = 0
+DROP_PCT = 90
+SAVE_LINKS = 1
+SAVE_CORRS = 0
 SAVE_PRECIPITATION = 1
+PLOT_ALL_GRAPHS = 0
 
-DATA_FILE = 'data/precipitation/FusedData.csv'
-LOCATIONS_FILE = 'data/precipitation/Fused.Locations.csv'
-PREC_DATA_FILE = f'data/precipitation/dataframe_drop_{DROP_PCT}.pkl'
-LINK_STR_FILE = f'data/precipitation/link_str_drop_{DROP_PCT}.pkl'
-CORRS_FILE = f'data/precipitation/corrs_drop_{DROP_PCT}.pkl'
+DATA_DIR = 'data/precipitation'
+DATA_FILE = f'{DATA_DIR}/FusedData.csv'
+LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
+PREC_DATA_FILE = f'{DATA_DIR}/dataframe_drop_{DROP_PCT}.pkl'
 
 YEARS = range(2000, 2022)
 MONTHS = range(1, 13)
 
 AVG_LOOKBACK_MONTHS = 12
 LAG_MONTHS = 6
-LINK_STR_THRESHOLD = 2.9
+LINK_STR_THRESHOLD = 2.7
 
-def build_network(df: pd.DataFrame):
-    if Path(LINK_STR_FILE).is_file():
-        print('Reading link strength data from pickle file')
-        link_str_df: pd.DataFrame = pd.read_pickle(LINK_STR_FILE)
-        corrs_df: pd.DataFrame = pd.read_pickle(CORRS_FILE)
-    else:
-        print('Calculating link strength data')
-        start = datetime.now()
-        link_str_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
-        corrs_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
-        df = df.reset_index().set_index(['lat', 'lon'])
+def build_link_str_df(df: pd.DataFrame):
+    link_str_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
+    corrs_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
+    df = df.reset_index().set_index(['lat', 'lon'])
+    for i, idx1 in enumerate(df.index):
+        if i % 25 == 0:
+            print(f'{i} / {len(df.index)} points correlated; time elapsed: {datetime.now() - start}')
+        for j, idx2 in enumerate(df.index[i + 1:]):
+            seq_1 = df.at[idx1, 'prec_seq']
+            seq_2 = df.at[idx2, 'prec_seq']
+            # Calculate covariance matrix from both unlagged and lagged sequences
+            seq_1_list = [seq_1[LAG_MONTHS :]]
+            seq_2_list = [seq_2[LAG_MONTHS :]]
+            for i in range(-1, -1 - LAG_MONTHS, -1):
+                seq_1_offset = seq_1[i + LAG_MONTHS : i]
+                seq_2_offset = seq_2[i + LAG_MONTHS : i]
+                seq_1_list.append(seq_1_offset)
+                seq_2_list.append(seq_2_offset)
+            # seq_list contains [seq_1_L0, seq_1_L1, ..., seq_2_L0, seq_2_L1, ...]
+            seq_list = [*seq_1_list, *seq_2_list]
+            # Covariance matrix will have 2 * (LAG_MONTHS + 1) rows and columns
+            cov_mat = np.corrcoef(seq_list)
+            # Extract coefficients corresponding to
+            # (seq_1_L0, seq_2_L0), (seq_1_L0, seq_2_L1), (seq_1_L0, seq_2_L2), ...
+            # and (seq_2_L0, seq_1_L1), (seq_2_L0, seq_1_L2), ...
+            corrs = np.abs([*cov_mat[LAG_MONTHS + 1 :, 0], *cov_mat[LAG_MONTHS + 1, 1 : LAG_MONTHS + 1]])
+            if SAVE_CORRS:
+                corrs_df.at[idx1, idx2] = corrs
+            # Calculate link strength from correlations as documented
+            link_str = (np.max(corrs) - np.mean(corrs)) / np.std(corrs)
+            link_str_df.at[idx1, idx2] = link_str
+    # link_str_df is upper triangular
+    link_str_df = link_str_df.add(link_str_df.T, fill_value=0).fillna(0)
+    return link_str_df, corrs_df
 
-        # TODO: optimise this
-        for i, idx1 in enumerate(df.index):
-            if i % 25 == 0:
-                print(f'{i} / {len(df.index)} points correlated')
-            for j, idx2 in enumerate(df.index[i + 1:]):
-                seq_1 = df.loc[idx1, 'prec_seq']
-                seq_2 = df.loc[idx2, 'prec_seq']
-                # Calculate covariance matrix from both unlagged and lagged sequences
-                seq_1_list = [seq_1[LAG_MONTHS :]]
-                seq_2_list = [seq_2[LAG_MONTHS :]]
-                for i in range(-1, -1 - LAG_MONTHS, -1):
-                    seq_1_offset = seq_1[i + LAG_MONTHS : i]
-                    seq_2_offset = seq_2[i + LAG_MONTHS : i]
-                    seq_1_list.append(seq_1_offset)
-                    seq_2_list.append(seq_2_offset)
-                # seq_list contains [seq_1_L0, seq_1_L1, ..., seq_2_L0, seq_2_L1, ...]
-                seq_list = [*seq_1_list, *seq_2_list]
-                # Covariance matrix will have 2 * (LAG_MONTHS + 1) rows and columns
-                cov_mat = np.corrcoef(seq_list)
-                # Extract coefficients corresponding to
-                # (seq_1_L0, seq_2_L0), (seq_1_L0, seq_2_L1), (seq_1_L0, seq_2_L2), ...
-                # and (seq_2_L0, seq_1_L1), (seq_2_L0, seq_1_L2), ...
-                corrs = np.abs([*cov_mat[LAG_MONTHS + 1 :, 0], *cov_mat[LAG_MONTHS + 1, 1 : LAG_MONTHS + 1]])
-                corrs_df.loc[idx1, idx2] = corrs
-                # Calculate link strength from correlations as documented
-                link_str = (np.max(corrs) - np.mean(corrs)) / np.std(corrs)
-                link_str_df.loc[idx1, idx2] = link_str
-        print(f'Correlations and link strengths calculated; time elapsed: {datetime.now() - start}')
-
-        # link_str_df is upper triangular
-        link_str_df = link_str_df.add(link_str_df.T, fill_value=0).fillna(0)
-        if SAVE_LINKS:
-            print('Saving link strength data to pickle file')
-            link_str_df.to_pickle(LINK_STR_FILE)
-            print('Saving correlation data to pickle file')
-            corrs_df.to_pickle(CORRS_FILE)
-
-    adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
-    adjacency[link_str_df >= LINK_STR_THRESHOLD] = 1
+def create_graph(adjacency: pd.DataFrame):
     graph = nx.from_numpy_matrix(adjacency.values)
     graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
+    return graph
 
+def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
+    if graph is None:
+        graph = create_graph(adjacency)
     graph_map = Basemap(
         projection='merc',
         llcrnrlon=110,
@@ -91,12 +83,10 @@ def build_network(df: pd.DataFrame):
         resolution='l',
         suppress_ticks=True,
     )
-    df = df.reset_index()
-    mx, my = graph_map(df['lon'], df['lat'])
+    mx, my = graph_map(lons, lats)
     pos = {}
     for i, elem in enumerate(adjacency.index):
         pos[elem] = (mx[i], my[i])
-
     nx.draw_networkx_nodes(G=graph, pos=pos, nodelist=graph.nodes(),
         node_color='r', alpha=0.8,
         node_size=[adjacency[location].sum() for location in graph.nodes()])
@@ -108,6 +98,19 @@ def build_network(df: pd.DataFrame):
     plt.tight_layout()
     plt.savefig('./map_1.png', format='png', dpi=300)
     plt.show()
+
+def calculate_network_metrics(graph):
+    return {
+        'average_degree': average_degree(graph),
+        'transitivity': transitivity(graph),
+        'eigenvector_centrality': eigenvector_centrality(graph),
+        'coreness': coreness(graph),
+        'average_shortest_path': average_shortest_path(graph),
+        'average_degree': average_degree(graph),
+        'eccentricity': eccentricity(graph),
+        'global_average_link_distance': global_average_link_distance(graph),
+        'modularity': modularity(graph),
+    }
 
 def main():
     if Path(PREC_DATA_FILE).is_file():
@@ -147,20 +150,82 @@ def main():
         if SAVE_PRECIPITATION:
             print('Saving precipitation data to pickle file')
             df.to_pickle(PREC_DATA_FILE)
+            # df.to_csv('data/precipitation/dataframe.csv')
 
+    graph_series = []
+    graph_times = []
+    timestamps = 0
+    timestamps_limit = 50
     for y in YEARS:
         for m in MONTHS:
+            if timestamps_limit and timestamps == timestamps_limit:
+                break
             dt = datetime(y, m, 1)
             try:
-                location_data = df.loc[dt]
+                location_df = df.loc[dt]
                 # Skip unless the sequence based on the specified lookback time is available
-                if location_data['prec_seq'].isnull().values.any():
-                    location_data = None
+                if location_df['prec_seq'].isnull().values.any():
+                    location_df = None
             except KeyError:
-                location_data = None
-            if location_data is not None:
-                build_network(location_data)
-                return
+                location_df = None
+            if location_df is not None:
+                date_summary = f'{dt.year}, {dt.strftime("%b")}'
+                month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
+                links_file = f'{DATA_DIR}/link_str_drop_{DROP_PCT}_{dt.year}_{month_str}.pkl'
+                corrs_file = f'{DATA_DIR}/corrs_drop_{DROP_PCT}_{dt.year}_{month_str}.pkl'
+                # TODO: Allow reading in correlations file
+                if Path(links_file).is_file():
+                    print(f'{date_summary}: reading link strength data from pickle file')
+                    link_str_df: pd.DataFrame = pd.read_pickle(links_file)
+                else:
+                    print(f'\n{date_summary}: calculating link strength data')
+                    start = datetime.now()
+                    link_str_df, corrs_df = build_link_str_df(location_df)
+                    print(f'{date_summary}: correlations and link strengths calculated; time elapsed: {datetime.now() - start}')
+                    if SAVE_LINKS:
+                        print(f'{date_summary}: saving link strength data to pickle file')
+                        link_str_df.to_pickle(links_file)
+                    if SAVE_CORRS:
+                        print(f'{date_summary}: saving correlation data to pickle file')
+                        corrs_df.to_pickle(corrs_file)
+
+                adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
+                adjacency[link_str_df >= LINK_STR_THRESHOLD] = 1
+                graph = create_graph(adjacency)
+                if PLOT_ALL_GRAPHS:
+                    plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
+                graph_metrics = calculate_network_metrics(graph)
+                graph_series.append({
+                    'graph': graph,
+                    'graph_metrics': graph_metrics,
+                    'link_metrics': {
+                        'average_link_strength': np.average(link_str_df),
+                    },
+                })
+                graph_times.append(dt)
+                timestamps += 1
+
+    # from pprint import pprint
+    # pprint(graph_series)
+    figure, axes = plt.subplots(5, 1)
+    axes[0].set_title('Average degree')
+    axes[0].plot(graph_times, [s['graph_metrics']['average_degree'] \
+        for s in graph_series], '-b')
+    axes[1].set_title('Coreness')
+    axes[1].plot(graph_times, [s['graph_metrics']['coreness'] \
+        for s in graph_series], '-g')
+    axes[2].set_title('Modularity')
+    axes[2].plot(graph_times, [s['graph_metrics']['modularity'] \
+        for s in graph_series], '-r')
+    axes[3].set_title('Transitivity')
+    axes[3].plot(graph_times, [s['graph_metrics']['transitivity'] \
+        for s in graph_series], '-m')
+    axes[4].set_title('Average link strength')
+    axes[4].plot(graph_times, [s['link_metrics']['average_link_strength'] \
+        for s in graph_series], '-m')
+    plt.show()
 
 if __name__ == '__main__':
+    start = datetime.now()
     main()
+    print(f'Total time elapsed: {datetime.now() - start}')
