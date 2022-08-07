@@ -5,14 +5,12 @@ from scipy.sparse.linalg import eigs
 def average_degree(graph: nx.Graph):
     return 2 * len(graph.edges) / len(graph.nodes)
 
-# TODO: Check if equal to triangle density
 def transitivity(graph: nx.Graph):
     return nx.transitivity(graph)
 
-# TODO: Fix
-def eigenvector_centrality(adjacency):
-    max_eval, max_evec = eigs(adjacency.astype('d'), k=1, which='LM')
-    return np.average(np.real(max_evec))
+def eigenvector_centrality(graph):
+    ec = nx.eigenvector_centrality(graph)
+    return sum(ec.values()) / len(graph.nodes)
 
 def coreness(graph: nx.Graph):
     k_indices = nx.core_number(graph).values()

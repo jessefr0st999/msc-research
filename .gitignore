@@ -2,3 +2,5 @@
 .pgdata
 __pycache__
 data
+basemap-*
+geckodriver*

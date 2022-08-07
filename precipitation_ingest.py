@@ -22,15 +22,17 @@ SAVE_LINKS = 1
 SAVE_CORRS = 0
 SAVE_PRECIPITATION = 1
 SAVE_METRICS = 1
+SAVE_MAP_IMAGES = 0
 CREATE_GRAPHS = 1
 PLOT_GRAPHS = 0
 TIMESTAMPS_LIMIT = 0
 
 DATA_DIR = 'data/precipitation'
+OUTPUTS_DIR = 'data/outputs'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 PREC_DATA_FILE = f'{DATA_DIR}/dataframe_drop_{DROP_PCT}.pkl'
-METRICS_DATA_FILE = f'{DATA_DIR}/metrics_drop_{DROP_PCT}.pkl'
+METRICS_DATA_FILE = f'{OUTPUTS_DIR}/metrics_drop_{DROP_PCT}.pkl'
 
 YEARS = range(2000, 2022)
 MONTHS = range(1, 13)
@@ -108,12 +110,12 @@ def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
     plt.savefig('./map_1.png', format='png', dpi=300)
     plt.show()
 
-def calculate_network_metrics(graph, adjacency):
+def calculate_network_metrics(graph):
     shortest_paths, eccentricities = shortest_path_and_eccentricity(graph)
     return {
         'average_degree': average_degree(graph),
         'transitivity': transitivity(graph),
-        'eigenvector_centrality': eigenvector_centrality(np.array(adjacency)),
+        'eigenvector_centrality': eigenvector_centrality(graph),
         'coreness': coreness(graph),
         'average_degree': average_degree(graph),
         'global_average_link_distance': global_average_link_distance(graph),
@@ -213,7 +215,7 @@ def main():
                     continue
                 print(f'{date_summary}: calculating graph metrics')
                 start = datetime.now()
-                graph_metrics = calculate_network_metrics(graph, adjacency)
+                graph_metrics = calculate_network_metrics(graph)
                 print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
                 graph_metrics_list.append({
                     'graph_metrics': graph_metrics,
@@ -227,24 +229,30 @@ def main():
 
     lats = []
     lons = []
-    spatial_metrics = ['eccentricity', 'average_shortest_path',
-        'degree', 'clustering']
+    spatial_metrics = ['eccentricity', 'average_shortest_path', 'degree',
+        'degree_centrality', 'eigenvector_centrality', 'clustering']
     spatial_metrics_dict = {}
     for node in graphs[0]:
         spatial_metrics_dict[node] = {m: [] for m in spatial_metrics}
         lats.append(node[0])
         lons.append(node[1])
     # Now perform spatial analysis by averaging across timesteps
+    print('Calculating spatial metrics')
+    start = datetime.now()
     for g in graphs:
         g: nx.Graph = g # Type hint
-        shortest_paths, eccentricities = shortest_path_and_eccentricity(graph)
+        average_shortest_path, eccentricity = shortest_path_and_eccentricity(graph)
         clustering = nx.clustering(g)
+        eigenvector_centrality = nx.eigenvector_centrality(g)
+        degree_centrality = nx.degree_centrality(g)
         for node in spatial_metrics_dict:
-            spatial_metrics_dict[node]['average_shortest_path'].append(shortest_paths[node])
-            spatial_metrics_dict[node]['eccentricity'].append(eccentricities[node])
             spatial_metrics_dict[node]['degree'].append(g.degree[node])
+            spatial_metrics_dict[node]['average_shortest_path'].append(average_shortest_path[node])
+            spatial_metrics_dict[node]['eccentricity'].append(eccentricity[node])
             spatial_metrics_dict[node]['clustering'].append(clustering[node])
-        break
+            spatial_metrics_dict[node]['eigenvector_centrality'].append(eigenvector_centrality[node])
+            spatial_metrics_dict[node]['degree_centrality'].append(degree_centrality[node])
+    print(f'Spatial metrics calculated; time elapsed: {datetime.now() - start}')
     for m in spatial_metrics:
         # Lower than average latitude to include Tasmania
         map = folium.Map(location=[np.average(lats) - 3, np.average(lons)], zoom_start=5)
@@ -256,15 +264,17 @@ def main():
             blur=30,
             max_zoom=1,
         )
-        map_file = f'{m}_drop_{DROP_PCT}.html'
-        image_file = f'{m}_drop_{DROP_PCT}.png'
+        map_file = f'{OUTPUTS_DIR}/{m}_drop_{DROP_PCT}.html'
         heatmap.add_to(map)
         map.save(map_file)
-        with webdriver.Firefox() as driver:
-            driver.get(f'{os.getcwd()}\\{map_file}')
-            time.sleep(1)
-            driver.save_screenshot(image_file)
-        print(f'Map file {map_file} and image file {image_file} saved!')
+        print(f'Map file {map_file} saved!')
+        if SAVE_MAP_IMAGES:
+            image_file = f'{OUTPUTS_DIR}/{m}_drop_{DROP_PCT}.png'
+            with webdriver.Firefox() as driver:
+                driver.get(f'{os.getcwd()}\\{map_file}')
+                time.sleep(1)
+                driver.save_screenshot(image_file)
+            print(f'Image file {image_file} saved!')
 
     if Path(METRICS_DATA_FILE).is_file():
         print(f'Reading graph metrics data from pickle file {METRICS_DATA_FILE}')
@@ -299,6 +309,7 @@ def main():
     axes[3, 1].set_title('Eccentricity')
     axes[3, 1].plot(graph_times, [l['graph_metrics']['eccentricity'] \
         for l in graph_metrics_list], '-', color='tab:cyan')
+    plt.savefig(f'{OUTPUTS_DIR}/graph_plots_drop_{DROP_PCT}.png')
     plt.show()
 
 if __name__ == '__main__':
