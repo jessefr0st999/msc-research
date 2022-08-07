@@ -1,34 +1,43 @@
 from pathlib import Path
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+import pickle
+import os
+import time
 
 import pandas as pd
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
+import folium
+import folium.plugins
+from selenium import webdriver
 
 from helpers import *
 
-# TODO: convert these to command line flags
-DATABASE_URI = 'postgresql+psycopg2://postgres:secret@localhost:5432/msc_research'
+# TODO: Convert these to command line flags
 DROP_PCT = 90
 SAVE_LINKS = 1
 SAVE_CORRS = 0
 SAVE_PRECIPITATION = 1
-PLOT_ALL_GRAPHS = 0
+SAVE_METRICS = 1
+CREATE_GRAPHS = 1
+PLOT_GRAPHS = 0
+TIMESTAMPS_LIMIT = 0
 
 DATA_DIR = 'data/precipitation'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 PREC_DATA_FILE = f'{DATA_DIR}/dataframe_drop_{DROP_PCT}.pkl'
+METRICS_DATA_FILE = f'{DATA_DIR}/metrics_drop_{DROP_PCT}.pkl'
 
 YEARS = range(2000, 2022)
 MONTHS = range(1, 13)
 
 AVG_LOOKBACK_MONTHS = 12
 LAG_MONTHS = 6
-LINK_STR_THRESHOLD = 2.7
+LINK_STR_THRESHOLD = 2.8
 
 def build_link_str_df(df: pd.DataFrame):
     link_str_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
@@ -99,22 +108,23 @@ def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
     plt.savefig('./map_1.png', format='png', dpi=300)
     plt.show()
 
-def calculate_network_metrics(graph):
+def calculate_network_metrics(graph, adjacency):
+    shortest_paths, eccentricities = shortest_path_and_eccentricity(graph)
     return {
         'average_degree': average_degree(graph),
         'transitivity': transitivity(graph),
-        'eigenvector_centrality': eigenvector_centrality(graph),
+        'eigenvector_centrality': eigenvector_centrality(np.array(adjacency)),
         'coreness': coreness(graph),
-        'average_shortest_path': average_shortest_path(graph),
         'average_degree': average_degree(graph),
-        'eccentricity': eccentricity(graph),
         'global_average_link_distance': global_average_link_distance(graph),
         'modularity': modularity(graph),
+        'shortest_path': np.average(list(shortest_paths.values())),
+        'eccentricity': np.average(list(eccentricities.values())),
     }
 
 def main():
     if Path(PREC_DATA_FILE).is_file():
-        print('Reading precipitation data from pickle file')
+        print(f'Reading precipitation data from pickle file {PREC_DATA_FILE}')
         df: pd.DataFrame = pd.read_pickle(PREC_DATA_FILE)
     else:
         print('Reading precipitation data from raw files')
@@ -148,17 +158,17 @@ def main():
         df = df.rename(columns={'level_2': 'date', 0: 'prec_seq', 'Lat': 'lat', 'Lon': 'lon'})
         df = df.set_index('date')
         if SAVE_PRECIPITATION:
-            print('Saving precipitation data to pickle file')
+            print(f'Saving precipitation data to pickle file {PREC_DATA_FILE}')
             df.to_pickle(PREC_DATA_FILE)
             # df.to_csv('data/precipitation/dataframe.csv')
 
-    graph_series = []
+    graphs = []
+    graph_metrics_list = []
     graph_times = []
     timestamps = 0
-    timestamps_limit = 50
     for y in YEARS:
         for m in MONTHS:
-            if timestamps_limit and timestamps == timestamps_limit:
+            if TIMESTAMPS_LIMIT and timestamps == TIMESTAMPS_LIMIT:
                 break
             dt = datetime(y, m, 1)
             try:
@@ -169,13 +179,14 @@ def main():
             except KeyError:
                 location_df = None
             if location_df is not None:
+                timestamps += 1
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
                 month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
                 links_file = f'{DATA_DIR}/link_str_drop_{DROP_PCT}_{dt.year}_{month_str}.pkl'
                 corrs_file = f'{DATA_DIR}/corrs_drop_{DROP_PCT}_{dt.year}_{month_str}.pkl'
                 # TODO: Allow reading in correlations file
                 if Path(links_file).is_file():
-                    print(f'{date_summary}: reading link strength data from pickle file')
+                    print(f'{date_summary}: reading link strength data from pickle file {links_file}')
                     link_str_df: pd.DataFrame = pd.read_pickle(links_file)
                 else:
                     print(f'\n{date_summary}: calculating link strength data')
@@ -183,46 +194,111 @@ def main():
                     link_str_df, corrs_df = build_link_str_df(location_df)
                     print(f'{date_summary}: correlations and link strengths calculated; time elapsed: {datetime.now() - start}')
                     if SAVE_LINKS:
-                        print(f'{date_summary}: saving link strength data to pickle file')
+                        print(f'{date_summary}: saving link strength data to pickle file {links_file}')
                         link_str_df.to_pickle(links_file)
                     if SAVE_CORRS:
-                        print(f'{date_summary}: saving correlation data to pickle file')
+                        print(f'{date_summary}: saving correlation data to pickle file {corrs_file}')
                         corrs_df.to_pickle(corrs_file)
 
+                if not CREATE_GRAPHS:
+                    continue
                 adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
                 adjacency[link_str_df >= LINK_STR_THRESHOLD] = 1
                 graph = create_graph(adjacency)
-                if PLOT_ALL_GRAPHS:
+                graphs.append(graph)
+                if PLOT_GRAPHS:
                     plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
-                graph_metrics = calculate_network_metrics(graph)
-                graph_series.append({
-                    'graph': graph,
+                graph_times.append(dt)
+                if Path(METRICS_DATA_FILE).is_file():
+                    continue
+                print(f'{date_summary}: calculating graph metrics')
+                start = datetime.now()
+                graph_metrics = calculate_network_metrics(graph, adjacency)
+                print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
+                graph_metrics_list.append({
                     'graph_metrics': graph_metrics,
                     'link_metrics': {
                         'average_link_strength': np.average(link_str_df),
                     },
                 })
-                graph_times.append(dt)
-                timestamps += 1
 
-    # from pprint import pprint
-    # pprint(graph_series)
-    figure, axes = plt.subplots(5, 1)
-    axes[0].set_title('Average degree')
-    axes[0].plot(graph_times, [s['graph_metrics']['average_degree'] \
-        for s in graph_series], '-b')
-    axes[1].set_title('Coreness')
-    axes[1].plot(graph_times, [s['graph_metrics']['coreness'] \
-        for s in graph_series], '-g')
-    axes[2].set_title('Modularity')
-    axes[2].plot(graph_times, [s['graph_metrics']['modularity'] \
-        for s in graph_series], '-r')
-    axes[3].set_title('Transitivity')
-    axes[3].plot(graph_times, [s['graph_metrics']['transitivity'] \
-        for s in graph_series], '-m')
-    axes[4].set_title('Average link strength')
-    axes[4].plot(graph_times, [s['link_metrics']['average_link_strength'] \
-        for s in graph_series], '-m')
+    if not CREATE_GRAPHS:
+        return
+
+    lats = []
+    lons = []
+    spatial_metrics = ['eccentricity', 'average_shortest_path',
+        'degree', 'clustering']
+    spatial_metrics_dict = {}
+    for node in graphs[0]:
+        spatial_metrics_dict[node] = {m: [] for m in spatial_metrics}
+        lats.append(node[0])
+        lons.append(node[1])
+    # Now perform spatial analysis by averaging across timesteps
+    for g in graphs:
+        g: nx.Graph = g # Type hint
+        shortest_paths, eccentricities = shortest_path_and_eccentricity(graph)
+        clustering = nx.clustering(g)
+        for node in spatial_metrics_dict:
+            spatial_metrics_dict[node]['average_shortest_path'].append(shortest_paths[node])
+            spatial_metrics_dict[node]['eccentricity'].append(eccentricities[node])
+            spatial_metrics_dict[node]['degree'].append(g.degree[node])
+            spatial_metrics_dict[node]['clustering'].append(clustering[node])
+        break
+    for m in spatial_metrics:
+        # Lower than average latitude to include Tasmania
+        map = folium.Map(location=[np.average(lats) - 3, np.average(lons)], zoom_start=5)
+        values = [np.average(v[m]) for v in spatial_metrics_dict.values()]
+        heatmap = folium.plugins.HeatMap(
+            list(zip(lats, lons, values)),
+            min_opacity=0.3,
+            radius=30,
+            blur=30,
+            max_zoom=1,
+        )
+        map_file = f'{m}_drop_{DROP_PCT}.html'
+        image_file = f'{m}_drop_{DROP_PCT}.png'
+        heatmap.add_to(map)
+        map.save(map_file)
+        with webdriver.Firefox() as driver:
+            driver.get(f'{os.getcwd()}\\{map_file}')
+            time.sleep(1)
+            driver.save_screenshot(image_file)
+        print(f'Map file {map_file} and image file {image_file} saved!')
+
+    if Path(METRICS_DATA_FILE).is_file():
+        print(f'Reading graph metrics data from pickle file {METRICS_DATA_FILE}')
+        with open(METRICS_DATA_FILE, 'rb') as f:
+            graph_metrics_list = pickle.load(f)
+    elif SAVE_METRICS:
+        print(f'Saving graph metrics data to pickle file {METRICS_DATA_FILE}')
+        with open(METRICS_DATA_FILE, 'wb') as f:
+            pickle.dump(graph_metrics_list, f)
+    figure, axes = plt.subplots(4, 2)
+    axes[0, 0].set_title('Average degree')
+    axes[0, 0].plot(graph_times, [l['graph_metrics']['average_degree'] \
+        for l in graph_metrics_list], '-b')
+    axes[1, 0].set_title('Coreness')
+    axes[1, 0].plot(graph_times, [l['graph_metrics']['coreness'] \
+        for l in graph_metrics_list], '-g')
+    axes[2, 0].set_title('Modularity')
+    axes[2, 0].plot(graph_times, [l['graph_metrics']['modularity'] \
+        for l in graph_metrics_list], '-r')
+    axes[3, 0].set_title('Transitivity')
+    axes[3, 0].plot(graph_times, [l['graph_metrics']['transitivity'] \
+        for l in graph_metrics_list], '-m')
+    axes[0, 1].set_title('Link strength')
+    axes[0, 1].plot(graph_times, [l['link_metrics']['average_link_strength'] \
+        for l in graph_metrics_list], '-k')
+    axes[1, 1].set_title('Eigenvector centrality')
+    axes[1, 1].plot(graph_times, [l['graph_metrics']['eigenvector_centrality'] \
+        for l in graph_metrics_list], '-y')
+    axes[2, 1].set_title('Shortest path')
+    axes[2, 1].plot(graph_times, [l['graph_metrics']['shortest_path'] \
+        for l in graph_metrics_list], '-', color='tab:orange')
+    axes[3, 1].set_title('Eccentricity')
+    axes[3, 1].plot(graph_times, [l['graph_metrics']['eccentricity'] \
+        for l in graph_metrics_list], '-', color='tab:cyan')
     plt.show()
 
 if __name__ == '__main__':
