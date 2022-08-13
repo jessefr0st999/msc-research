@@ -16,6 +16,9 @@ from selenium import webdriver
 
 from helpers import *
 
+
+## Constants
+
 # TODO: Convert these to command line flags
 DROP_PCT = 90
 SAVE_LINKS = 1
@@ -25,29 +28,34 @@ SAVE_METRICS = 1
 SAVE_MAP_IMAGES = 0
 CREATE_GRAPHS = 1
 PLOT_GRAPHS = 0
-TIMESTAMPS_LIMIT = 0
+ANALYSED_DT_LIMIT = 0
+LINK_STR_THRESHOLD = 2.8
+AVG_LOOKBACK_MONTHS = 12
+LAG_MONTHS = 6
 
 DATA_DIR = 'data/precipitation'
 OUTPUTS_DIR = 'data/outputs'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 PREC_DATA_FILE = f'{DATA_DIR}/dataframe_drop_{DROP_PCT}.pkl'
-METRICS_DATA_FILE = f'{OUTPUTS_DIR}/metrics_drop_{DROP_PCT}.pkl'
+TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics_drop_{DROP_PCT}_thr_' + \
+    f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
+SPATIAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_{DROP_PCT}_thr_' + \
+    f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
 
 YEARS = range(2000, 2022)
 MONTHS = range(1, 13)
 
-AVG_LOOKBACK_MONTHS = 12
-LAG_MONTHS = 6
-LINK_STR_THRESHOLD = 2.8
 
-def build_link_str_df(df: pd.DataFrame):
+## Helper functions
+
+def build_link_str_df(df: pd.DataFrame, start_time=None):
     link_str_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
     corrs_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
     df = df.reset_index().set_index(['lat', 'lon'])
     for i, idx1 in enumerate(df.index):
-        if i % 25 == 0:
-            print(f'{i} / {len(df.index)} points correlated; time elapsed: {datetime.now() - start}')
+        if start_time and i % 25 == 0:
+            print(f'{i} / {len(df.index)} points correlated; time elapsed: {datetime.now() - start_time}')
         for j, idx2 in enumerate(df.index[i + 1:]):
             seq_1 = df.at[idx1, 'prec_seq']
             seq_2 = df.at[idx2, 'prec_seq']
@@ -124,53 +132,58 @@ def calculate_network_metrics(graph):
         'eccentricity': np.average(list(eccentricities.values())),
     }
 
+def prepare_prec_df(input_df):
+    input_df.columns = pd.to_datetime(input_df.columns, format='D%Y.%m')
+    df_locations = pd.read_csv(LOCATIONS_FILE)
+    df = pd.concat([df_locations, input_df], axis=1)
+
+    # Remove a random subset of locations from dataframe for quicker testing
+    if DROP_PCT > 0:
+        np.random.seed(10)
+        _floor = lambda n: int(n // 1)
+        drop_indices = np.random.choice(df.index, _floor(0.01 * DROP_PCT * len(df)), replace=False)
+        df = df.drop(drop_indices)
+
+    df = df.set_index(['Lat', 'Lon'])
+    def seq_func(row: pd.Series):
+        def func(start_date, end_date, r: pd.Series):
+            sequence = r[(r.index > start_date) & (r.index <= end_date)]
+            return list(sequence) if len(sequence) == AVG_LOOKBACK_MONTHS + LAG_MONTHS else None
+        vec_func = np.vectorize(func, excluded=['r'])
+        start_dates = [d - relativedelta(months=AVG_LOOKBACK_MONTHS + LAG_MONTHS) for d in row.index]
+        end_dates = [d for d in row.index]
+        _row = vec_func(start_date=start_dates, end_date=end_dates, r=row)
+        return pd.Series(_row, index=row.index)
+    start = datetime.now()
+    print('Constructing sequences...')
+    df = df.apply(seq_func, axis=1)
+    print(f'Sequences constructed; time elapsed: {datetime.now() - start}')
+    df = df.stack().reset_index()
+    df = df.rename(columns={'level_2': 'date', 0: 'prec_seq', 'Lat': 'lat', 'Lon': 'lon'})
+    df = df.set_index('date')
+    return df
+
+
+## Workflow
+
 def main():
     if Path(PREC_DATA_FILE).is_file():
         print(f'Reading precipitation data from pickle file {PREC_DATA_FILE}')
         df: pd.DataFrame = pd.read_pickle(PREC_DATA_FILE)
     else:
         print('Reading precipitation data from raw files')
-        df_data = pd.read_csv(DATA_FILE)
-        df_data.columns = pd.to_datetime(df_data.columns, format='D%Y.%m')
-        df_locations = pd.read_csv(LOCATIONS_FILE)
-        df = pd.concat([df_locations, df_data], axis=1)
-
-        # Remove a random subset of locations from dataframe for quicker testing
-        if DROP_PCT > 0:
-            np.random.seed(10)
-            _floor = lambda n: int(n // 1)
-            drop_indices = np.random.choice(df.index, _floor(0.01 * DROP_PCT * len(df)), replace=False)
-            df = df.drop(drop_indices)
-
-        df = df.set_index(['Lat', 'Lon'])
-        def seq_func(row: pd.Series):
-            def func(start_date, end_date, r: pd.Series):
-                sequence = r[(r.index > start_date) & (r.index <= end_date)]
-                return list(sequence) if len(sequence) == AVG_LOOKBACK_MONTHS + LAG_MONTHS else None
-            vec_func = np.vectorize(func, excluded=['r'])
-            start_dates = [d - relativedelta(months=AVG_LOOKBACK_MONTHS + LAG_MONTHS) for d in row.index]
-            end_dates = [d for d in row.index]
-            _row = vec_func(start_date=start_dates, end_date=end_dates, r=row)
-            return pd.Series(_row, index=row.index)
-        start = datetime.now()
-        print('Constructing sequences...')
-        df = df.apply(seq_func, axis=1)
-        print(f'Sequences constructed; time elapsed: {datetime.now() - start}')
-        df = df.stack().reset_index()
-        df = df.rename(columns={'level_2': 'date', 0: 'prec_seq', 'Lat': 'lat', 'Lon': 'lon'})
-        df = df.set_index('date')
+        df = prepare_prec_df(pd.read_csv(DATA_FILE))
         if SAVE_PRECIPITATION:
             print(f'Saving precipitation data to pickle file {PREC_DATA_FILE}')
             df.to_pickle(PREC_DATA_FILE)
-            # df.to_csv('data/precipitation/dataframe.csv')
 
     graphs = []
-    graph_metrics_list = []
+    time_metrics_list = []
     graph_times = []
-    timestamps = 0
+    analysed_dt_count = 0
     for y in YEARS:
         for m in MONTHS:
-            if TIMESTAMPS_LIMIT and timestamps == TIMESTAMPS_LIMIT:
+            if ANALYSED_DT_LIMIT and analysed_dt_count == ANALYSED_DT_LIMIT:
                 break
             dt = datetime(y, m, 1)
             try:
@@ -181,7 +194,7 @@ def main():
             except KeyError:
                 location_df = None
             if location_df is not None:
-                timestamps += 1
+                analysed_dt_count += 1
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
                 month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
                 links_file = f'{DATA_DIR}/link_str_drop_{DROP_PCT}_{dt.year}_{month_str}.pkl'
@@ -193,7 +206,7 @@ def main():
                 else:
                     print(f'\n{date_summary}: calculating link strength data')
                     start = datetime.now()
-                    link_str_df, corrs_df = build_link_str_df(location_df)
+                    link_str_df, corrs_df = build_link_str_df(location_df, start)
                     print(f'{date_summary}: correlations and link strengths calculated; time elapsed: {datetime.now() - start}')
                     if SAVE_LINKS:
                         print(f'{date_summary}: saving link strength data to pickle file {links_file}')
@@ -211,13 +224,13 @@ def main():
                 if PLOT_GRAPHS:
                     plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
                 graph_times.append(dt)
-                if Path(METRICS_DATA_FILE).is_file():
+                if Path(TIME_METRICS_DATA_FILE).is_file():
                     continue
                 print(f'{date_summary}: calculating graph metrics')
                 start = datetime.now()
                 graph_metrics = calculate_network_metrics(graph)
                 print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
-                graph_metrics_list.append({
+                time_metrics_list.append({
                     'graph_metrics': graph_metrics,
                     'link_metrics': {
                         'average_link_strength': np.average(link_str_df),
@@ -227,6 +240,17 @@ def main():
     if not CREATE_GRAPHS:
         return
 
+    # Input/output for time metrics
+    if Path(TIME_METRICS_DATA_FILE).is_file():
+        print(f'Reading time series metrics from pickle file {TIME_METRICS_DATA_FILE}')
+        with open(TIME_METRICS_DATA_FILE, 'rb') as f:
+            time_metrics_list = pickle.load(f)
+    elif SAVE_METRICS:
+        print(f'Saving time series metrics to pickle file {TIME_METRICS_DATA_FILE}')
+        with open(TIME_METRICS_DATA_FILE, 'wb') as f:
+            pickle.dump(time_metrics_list, f)
+
+    # Perform spatial analysis by averaging across timesteps
     lats = []
     lons = []
     spatial_metrics = ['eccentricity', 'average_shortest_path', 'degree',
@@ -236,23 +260,37 @@ def main():
         spatial_metrics_dict[node] = {m: [] for m in spatial_metrics}
         lats.append(node[0])
         lons.append(node[1])
-    # Now perform spatial analysis by averaging across timesteps
-    print('Calculating spatial metrics')
-    start = datetime.now()
-    for g in graphs:
-        g: nx.Graph = g # Type hint
-        average_shortest_path, eccentricity = shortest_path_and_eccentricity(graph)
-        clustering = nx.clustering(g)
-        eigenvector_centrality = nx.eigenvector_centrality(g)
-        degree_centrality = nx.degree_centrality(g)
-        for node in spatial_metrics_dict:
-            spatial_metrics_dict[node]['degree'].append(g.degree[node])
-            spatial_metrics_dict[node]['average_shortest_path'].append(average_shortest_path[node])
-            spatial_metrics_dict[node]['eccentricity'].append(eccentricity[node])
-            spatial_metrics_dict[node]['clustering'].append(clustering[node])
-            spatial_metrics_dict[node]['eigenvector_centrality'].append(eigenvector_centrality[node])
-            spatial_metrics_dict[node]['degree_centrality'].append(degree_centrality[node])
-    print(f'Spatial metrics calculated; time elapsed: {datetime.now() - start}')
+
+    # Input for spatial metrics
+    if Path(SPATIAL_METRICS_DATA_FILE).is_file():
+        print(f'Reading spatial metrics from pickle file {SPATIAL_METRICS_DATA_FILE}')
+        with open(SPATIAL_METRICS_DATA_FILE, 'rb') as f:
+            spatial_metrics_dict = pickle.load(f)
+    else:
+        print('Calculating spatial metrics')
+        start = datetime.now()
+        for g in graphs:
+            g: nx.Graph = g # Type hint
+            average_shortest_path, eccentricity = shortest_path_and_eccentricity(graph)
+            clustering = nx.clustering(g)
+            eigenvector_centrality = nx.eigenvector_centrality(g)
+            degree_centrality = nx.degree_centrality(g)
+            for node in spatial_metrics_dict:
+                spatial_metrics_dict[node]['degree'].append(g.degree[node])
+                spatial_metrics_dict[node]['average_shortest_path'].append(average_shortest_path[node])
+                spatial_metrics_dict[node]['eccentricity'].append(eccentricity[node])
+                spatial_metrics_dict[node]['clustering'].append(clustering[node])
+                spatial_metrics_dict[node]['eigenvector_centrality'].append(eigenvector_centrality[node])
+                spatial_metrics_dict[node]['degree_centrality'].append(degree_centrality[node])
+        print(f'Spatial metrics calculated; time elapsed: {datetime.now() - start}')
+
+    # Output for spatial metrics
+    if SAVE_METRICS and not Path(SPATIAL_METRICS_DATA_FILE).is_file():
+        print(f'Saving spatial metrics to pickle file {SPATIAL_METRICS_DATA_FILE}')
+        with open(SPATIAL_METRICS_DATA_FILE, 'wb') as f:
+            pickle.dump(spatial_metrics_dict, f)
+
+    # Construct HTML files with spatial metric plots
     for m in spatial_metrics:
         # Lower than average latitude to include Tasmania
         map = folium.Map(location=[np.average(lats) - 3, np.average(lons)], zoom_start=5)
@@ -276,39 +314,32 @@ def main():
                 driver.save_screenshot(image_file)
             print(f'Image file {image_file} saved!')
 
-    if Path(METRICS_DATA_FILE).is_file():
-        print(f'Reading graph metrics data from pickle file {METRICS_DATA_FILE}')
-        with open(METRICS_DATA_FILE, 'rb') as f:
-            graph_metrics_list = pickle.load(f)
-    elif SAVE_METRICS:
-        print(f'Saving graph metrics data to pickle file {METRICS_DATA_FILE}')
-        with open(METRICS_DATA_FILE, 'wb') as f:
-            pickle.dump(graph_metrics_list, f)
+    # Construct figures for time series metrics
     figure, axes = plt.subplots(4, 2)
     axes[0, 0].set_title('Average degree')
     axes[0, 0].plot(graph_times, [l['graph_metrics']['average_degree'] \
-        for l in graph_metrics_list], '-b')
+        for l in time_metrics_list], '-b')
     axes[1, 0].set_title('Coreness')
     axes[1, 0].plot(graph_times, [l['graph_metrics']['coreness'] \
-        for l in graph_metrics_list], '-g')
+        for l in time_metrics_list], '-g')
     axes[2, 0].set_title('Modularity')
     axes[2, 0].plot(graph_times, [l['graph_metrics']['modularity'] \
-        for l in graph_metrics_list], '-r')
+        for l in time_metrics_list], '-r')
     axes[3, 0].set_title('Transitivity')
     axes[3, 0].plot(graph_times, [l['graph_metrics']['transitivity'] \
-        for l in graph_metrics_list], '-m')
+        for l in time_metrics_list], '-m')
     axes[0, 1].set_title('Link strength')
     axes[0, 1].plot(graph_times, [l['link_metrics']['average_link_strength'] \
-        for l in graph_metrics_list], '-k')
+        for l in time_metrics_list], '-k')
     axes[1, 1].set_title('Eigenvector centrality')
     axes[1, 1].plot(graph_times, [l['graph_metrics']['eigenvector_centrality'] \
-        for l in graph_metrics_list], '-y')
+        for l in time_metrics_list], '-y')
     axes[2, 1].set_title('Shortest path')
     axes[2, 1].plot(graph_times, [l['graph_metrics']['shortest_path'] \
-        for l in graph_metrics_list], '-', color='tab:orange')
+        for l in time_metrics_list], '-', color='tab:orange')
     axes[3, 1].set_title('Eccentricity')
     axes[3, 1].plot(graph_times, [l['graph_metrics']['eccentricity'] \
-        for l in graph_metrics_list], '-', color='tab:cyan')
+        for l in time_metrics_list], '-', color='tab:cyan')
     plt.savefig(f'{OUTPUTS_DIR}/graph_plots_drop_{DROP_PCT}.png')
     plt.show()
 
