@@ -92,7 +92,7 @@ def create_graph(adjacency: pd.DataFrame):
 def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
     if graph is None:
         graph = create_graph(adjacency)
-    graph_map = Basemap(
+    _map = Basemap(
         projection='merc',
         llcrnrlon=110,
         llcrnrlat=-45,
@@ -102,7 +102,7 @@ def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
         resolution='l',
         suppress_ticks=True,
     )
-    mx, my = graph_map(lons, lats)
+    mx, my = _map(lons, lats)
     pos = {}
     for i, elem in enumerate(adjacency.index):
         pos[elem] = (mx[i], my[i])
@@ -111,9 +111,9 @@ def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
         node_size=[adjacency[location].sum() for location in graph.nodes()])
     nx.draw_networkx_edges(G=graph, pos=pos, edge_color='g',
         alpha=0.2, arrows=False)
-    graph_map.drawcountries(linewidth=3)
-    graph_map.drawstates(linewidth=0.2)
-    graph_map.drawcoastlines(linewidth=3)
+    _map.drawcountries(linewidth=3)
+    _map.drawstates(linewidth=0.2)
+    _map.drawcoastlines(linewidth=3)
     plt.tight_layout()
     plt.savefig('./map_1.png', format='png', dpi=300)
     plt.show()
@@ -204,7 +204,7 @@ def main():
                     print(f'{date_summary}: reading link strength data from pickle file {links_file}')
                     link_str_df: pd.DataFrame = pd.read_pickle(links_file)
                 else:
-                    print(f'\n{date_summary}: calculating link strength data')
+                    print(f'\n{date_summary}: calculating link strength data...')
                     start = datetime.now()
                     link_str_df, corrs_df = build_link_str_df(location_df, start)
                     print(f'{date_summary}: correlations and link strengths calculated; time elapsed: {datetime.now() - start}')
@@ -226,7 +226,7 @@ def main():
                 graph_times.append(dt)
                 if Path(TIME_METRICS_DATA_FILE).is_file():
                     continue
-                print(f'{date_summary}: calculating graph metrics')
+                print(f'{date_summary}: calculating graph metrics...')
                 start = datetime.now()
                 graph_metrics = calculate_network_metrics(graph)
                 print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
@@ -267,7 +267,7 @@ def main():
         with open(SPATIAL_METRICS_DATA_FILE, 'rb') as f:
             spatial_metrics_dict = pickle.load(f)
     else:
-        print('Calculating spatial metrics')
+        print('Calculating spatial metrics...')
         start = datetime.now()
         for g in graphs:
             g: nx.Graph = g # Type hint
