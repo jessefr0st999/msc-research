@@ -19,7 +19,13 @@ cmap = colors.ListedColormap([colours[i] for i in range(n_categories + 1)])
 bounds = [x - 0.5 for x in range(n_categories + 2)]
 norm = colors.BoundaryNorm(bounds, cmap.N)
 
+lon_start = 110
+lon_end = 155
+lat_start = -45
+lat_end = -10
+
 def main():
+    figure, axis = plt.subplots()
     metrics_dict = pd.read_pickle(DATA_FILE)
     df = pd.DataFrame.from_dict(metrics_dict).T.reset_index()
     for m in spatial_metrics:
@@ -32,16 +38,14 @@ def main():
     # train_data = np.array(df['clustering']).reshape(-1, 1)
     kmeans = KMeans(n_clusters=n_categories, random_state=0).fit(train_data)
     df['category'] = [x + 1 for x in kmeans.labels_]
-    grid_data = df.reset_index().pivot(index='lat', columns='lon', values='category')
-    grid_data = grid_data.replace(np.nan, 0)
 
     def get_map():
         _map = Basemap(
             projection='merc',
-            llcrnrlon=110,
-            llcrnrlat=-45,
-            urcrnrlon=155,
-            urcrnrlat=-10,
+            llcrnrlon=lon_start,
+            llcrnrlat=lat_start,
+            urcrnrlon=lon_end,
+            urcrnrlat=lat_end,
             lat_ts=0,
             resolution='l',
             suppress_ticks=True,
@@ -51,12 +55,19 @@ def main():
         _map.drawcoastlines(linewidth=3)
         return _map
 
-    # TODO: scale this onto a map with a grid
-    # _map = get_map()
-    # lon_span = np.linspace(0, _map.urcrnrx, grid_size[0])
-    # lat_span = np.linspace(0, _map.urcrnry, grid_size[1])
-    figure, axis = plt.subplots()
-    img = axis.imshow(grid_data, cmap=cmap, norm=norm, origin='lower')
+    lons = np.linspace(lon_start + 0.5, lon_end - 0.5, int(lon_end - lon_start))
+    lats = np.linspace(lat_start + 0.25, lat_end - 0.25, int((lat_end - lat_start) / 0.5))
+    _map = get_map()
+    map_grid_data = pd.DataFrame(pd.DataFrame(0, columns=lons, index=lats).stack())
+    map_grid_data = map_grid_data.reset_index().rename(
+        columns={'level_0': 'lat', 'level_1': 'lon'})
+    df = df.reset_index().rename(columns={'level_0': 'lat', 'level_1': 'lon'})
+    map_df = pd.merge(map_grid_data, df, on=['lat', 'lon'], how='left')
+    map_df = map_df.reset_index().pivot(index='lat', columns='lon', values='category')
+    map_df = map_df.replace(np.nan, 0)
+
+    img = axis.imshow(map_df, cmap=cmap, norm=norm, origin='lower',
+        extent=(0, _map.urcrnrx, 0, _map.urcrnry))
     plt.colorbar(img, cmap=cmap, norm=norm, boundaries=bounds,
         ticks=list(range(n_categories + 1)))
     plt.show()

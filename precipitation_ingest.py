@@ -102,10 +102,10 @@ def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
         resolution='l',
         suppress_ticks=True,
     )
-    mx, my = _map(lons, lats)
+    map_x, map_y = _map(lons, lats)
     pos = {}
     for i, elem in enumerate(adjacency.index):
-        pos[elem] = (mx[i], my[i])
+        pos[elem] = (map_x[i], map_y[i])
     nx.draw_networkx_nodes(G=graph, pos=pos, nodelist=graph.nodes(),
         node_color='r', alpha=0.8,
         node_size=[adjacency[location].sum() for location in graph.nodes()])
