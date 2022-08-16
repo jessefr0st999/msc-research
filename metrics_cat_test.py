@@ -8,10 +8,11 @@ from sklearn.cluster import KMeans
 OUTPUTS_DIR = 'data/outputs'
 # DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_90_thr_2p8.pkl'
 DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_50_thr_2p8.pkl'
+# DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_0_thr_2p8.pkl' # currently only 1 time step
 grid_size = (50, 50)
 spatial_metrics = ['eccentricity', 'average_shortest_path', 'degree',
     'degree_centrality', 'eigenvector_centrality', 'clustering']
-n_categories = 5
+n_categories = 6
 
 colours = ['grey', '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
     '#8c564b', '#e377c2', 'white', '#bcbd22', '#17becf']
@@ -30,9 +31,10 @@ def main():
     df = pd.DataFrame.from_dict(metrics_dict).T.reset_index()
     for m in spatial_metrics:
         df[m] = df[m].fillna(0).apply(lambda series: np.average(series))
+        df[m] = df[m] / df[m].max()
     df = df.rename(columns={'level_0': 'lat', 'level_1': 'lon'})
     df = df.set_index(['lat', 'lon'])
-    df = df / df.max()
+    df = df[spatial_metrics]
 
     train_data = np.array(df)
     # train_data = np.array(df['clustering']).reshape(-1, 1)
