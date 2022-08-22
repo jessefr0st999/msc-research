@@ -244,12 +244,8 @@ def main():
     if not CREATE_GRAPHS:
         return
 
-    # Input/output for time metrics
-    if Path(TIME_METRICS_DATA_FILE).is_file():
-        print(f'Reading time series metrics from pickle file {TIME_METRICS_DATA_FILE}')
-        with open(TIME_METRICS_DATA_FILE, 'rb') as f:
-            time_metrics_list = pickle.load(f)
-    elif SAVE_METRICS:
+    # Output for time metrics
+    if SAVE_METRICS:
         print(f'Saving time series metrics to pickle file {TIME_METRICS_DATA_FILE}')
         with open(TIME_METRICS_DATA_FILE, 'wb') as f:
             pickle.dump(time_metrics_list, f)
@@ -344,35 +340,6 @@ def main():
                 time.sleep(1)
                 driver.save_screenshot(image_file)
             print(f'Image file {image_file} saved!')
-
-    # Construct figures for time series metrics
-    figure, axes = plt.subplots(4, 2)
-    axes[0, 0].set_title('Average degree')
-    axes[0, 0].plot(graph_times, [l['graph_metrics']['average_degree'] \
-        for l in time_metrics_list], '-b')
-    axes[1, 0].set_title('Coreness')
-    axes[1, 0].plot(graph_times, [l['graph_metrics']['coreness'] \
-        for l in time_metrics_list], '-g')
-    axes[2, 0].set_title('Modularity')
-    axes[2, 0].plot(graph_times, [l['graph_metrics']['modularity'] \
-        for l in time_metrics_list], '-r')
-    axes[3, 0].set_title('Transitivity')
-    axes[3, 0].plot(graph_times, [l['graph_metrics']['transitivity'] \
-        for l in time_metrics_list], '-m')
-    axes[0, 1].set_title('Link strength')
-    axes[0, 1].plot(graph_times, [l['link_metrics']['average_link_strength'] \
-        for l in time_metrics_list], '-k')
-    axes[1, 1].set_title('Eigenvector centrality')
-    axes[1, 1].plot(graph_times, [l['graph_metrics']['eigenvector_centrality'] \
-        for l in time_metrics_list], '-y')
-    axes[2, 1].set_title('Shortest path')
-    axes[2, 1].plot(graph_times, [l['graph_metrics']['shortest_path'] \
-        for l in time_metrics_list], '-', color='tab:orange')
-    axes[3, 1].set_title('Eccentricity')
-    axes[3, 1].plot(graph_times, [l['graph_metrics']['eccentricity'] \
-        for l in time_metrics_list], '-', color='tab:cyan')
-    plt.savefig(f'{OUTPUTS_DIR}/graph_plots_drop_{DROP_PCT}.png')
-    plt.show()
 
 if __name__ == '__main__':
     start = datetime.now()
