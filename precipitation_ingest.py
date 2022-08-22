@@ -1,5 +1,5 @@
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import pickle
 import os
@@ -42,6 +42,8 @@ TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics_drop_{DROP_PCT}_thr_' + \
     f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
 SPATIAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_{DROP_PCT}_thr_' + \
     f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
+SEASONAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/seasonal_metrics_drop_{DROP_PCT}_thr_' + \
+    f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
 
 YEARS = range(2000, 2022)
 MONTHS = range(1, 13)
@@ -74,7 +76,8 @@ def build_link_str_df(df: pd.DataFrame, start_time=None):
             # Extract coefficients corresponding to
             # (seq_1_L0, seq_2_L0), (seq_1_L0, seq_2_L1), (seq_1_L0, seq_2_L2), ...
             # and (seq_2_L0, seq_1_L1), (seq_2_L0, seq_1_L2), ...
-            corrs = np.abs([*cov_mat[LAG_MONTHS + 1 :, 0], *cov_mat[LAG_MONTHS + 1, 1 : LAG_MONTHS + 1]])
+            corrs = np.abs([*cov_mat[LAG_MONTHS + 1 :, 0],
+                *cov_mat[LAG_MONTHS + 1, 1 : LAG_MONTHS + 1]])
             if SAVE_CORRS:
                 corrs_df.at[idx1, idx2] = corrs
             # Calculate link strength from correlations as documented
@@ -221,9 +224,9 @@ def main():
                 adjacency[link_str_df >= LINK_STR_THRESHOLD] = 1
                 graph = create_graph(adjacency)
                 graphs.append(graph)
+                graph_times.append(dt)
                 if PLOT_GRAPHS:
                     plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
-                graph_times.append(dt)
                 if Path(TIME_METRICS_DATA_FILE).is_file():
                     continue
                 print(f'{date_summary}: calculating graph metrics...')
@@ -231,6 +234,7 @@ def main():
                 graph_metrics = calculate_network_metrics(graph)
                 print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
                 time_metrics_list.append({
+                    'dt': dt,
                     'graph_metrics': graph_metrics,
                     'link_metrics': {
                         'average_link_strength': np.average(link_str_df),
@@ -256,32 +260,55 @@ def main():
     spatial_metrics = ['eccentricity', 'average_shortest_path', 'degree',
         'degree_centrality', 'eigenvector_centrality', 'clustering']
     spatial_metrics_dict = {}
+    seasons = ['summer', 'autumn', 'winter', 'spring']
+    seasonal_metrics_dict = {season: {} for season in seasons}
     for node in graphs[0]:
         spatial_metrics_dict[node] = {m: [] for m in spatial_metrics}
+        for season in seasons:
+            seasonal_metrics_dict[season][node] = {m: [] for m in spatial_metrics}
         lats.append(node[0])
         lons.append(node[1])
 
     # Input for spatial metrics
-    if Path(SPATIAL_METRICS_DATA_FILE).is_file():
-        print(f'Reading spatial metrics from pickle file {SPATIAL_METRICS_DATA_FILE}')
+    if Path(SPATIAL_METRICS_DATA_FILE).is_file() and Path(SEASONAL_METRICS_DATA_FILE).is_file():
+        print('Reading spatial metrics from pickle files '
+            f'{SPATIAL_METRICS_DATA_FILE} and {SEASONAL_METRICS_DATA_FILE}')
         with open(SPATIAL_METRICS_DATA_FILE, 'rb') as f:
             spatial_metrics_dict = pickle.load(f)
+        with open(SEASONAL_METRICS_DATA_FILE, 'rb') as f:
+            seasonal_metrics_dict = pickle.load(f)
     else:
-        print('Calculating spatial metrics...')
         start = datetime.now()
-        for g in graphs:
-            g: nx.Graph = g # Type hint
+        for g, dt in zip(graphs, graph_times):
+            date_summary = f'{dt.year}, {dt.strftime("%b")}'
+            print(f'{date_summary}: calculating spatial metrics...')
+            if dt.month in [12, 1, 2]:
+                season = 'summer'
+            elif dt.month in [3, 4, 5]:
+                season = 'autumn'
+            elif dt.month in [6, 7, 8]:
+                season = 'winter'
+            else:
+                season = 'spring'
+            # Type hints
+            g: nx.Graph = g
+            dt: datetime = dt
             average_shortest_path, eccentricity = shortest_path_and_eccentricity(graph)
             clustering = nx.clustering(g)
             eigenvector_centrality = nx.eigenvector_centrality(g)
             degree_centrality = nx.degree_centrality(g)
-            for node in spatial_metrics_dict:
-                spatial_metrics_dict[node]['degree'].append(g.degree[node])
-                spatial_metrics_dict[node]['average_shortest_path'].append(average_shortest_path[node])
-                spatial_metrics_dict[node]['eccentricity'].append(eccentricity[node])
-                spatial_metrics_dict[node]['clustering'].append(clustering[node])
-                spatial_metrics_dict[node]['eigenvector_centrality'].append(eigenvector_centrality[node])
-                spatial_metrics_dict[node]['degree_centrality'].append(degree_centrality[node])
+            def set_metrics(_dict):
+                _dict['degree'].append(g.degree[node])
+                _dict['average_shortest_path'].append(average_shortest_path[node])
+                _dict['eccentricity'].append(eccentricity[node])
+                _dict['clustering'].append(clustering[node])
+                _dict['eigenvector_centrality'].append(eigenvector_centrality[node])
+                _dict['degree_centrality'].append(degree_centrality[node])
+                return _dict
+            for node in graphs[0]:
+                spatial_metrics_dict[node] = set_metrics(spatial_metrics_dict[node])
+                seasonal_metrics_dict[season][node] = set_metrics(seasonal_metrics_dict[season][node])
+
         print(f'Spatial metrics calculated; time elapsed: {datetime.now() - start}')
 
     # Output for spatial metrics
@@ -289,6 +316,10 @@ def main():
         print(f'Saving spatial metrics to pickle file {SPATIAL_METRICS_DATA_FILE}')
         with open(SPATIAL_METRICS_DATA_FILE, 'wb') as f:
             pickle.dump(spatial_metrics_dict, f)
+    if SAVE_METRICS and not Path(SEASONAL_METRICS_DATA_FILE).is_file():
+        print(f'Saving seasonal spatial metrics to pickle file {SEASONAL_METRICS_DATA_FILE}')
+        with open(SEASONAL_METRICS_DATA_FILE, 'wb') as f:
+            pickle.dump(seasonal_metrics_dict, f)
 
     # Construct HTML files with spatial metric plots
     for m in spatial_metrics:
