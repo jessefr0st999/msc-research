@@ -98,4 +98,5 @@ asp_map = get_map()
 asp_map.contourf(X, Y, degree_centrality)
 plt.colorbar(ax=axis)
 
+plt.tight_layout()
 plt.show()
