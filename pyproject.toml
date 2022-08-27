@@ -16,6 +16,8 @@ GeoAlchemy2 = "^0.12.3"
 folium = "^0.12.1"
 pyproj = "^3.3.1"
 selenium = "^4.3.0"
+sklearn = "^0.0"
+geopy = "^2.2.0"
 
 [tool.poetry.dev-dependencies]
 
