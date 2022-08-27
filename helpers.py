@@ -1,6 +1,6 @@
 import networkx as nx
 import numpy as np
-from scipy.sparse.linalg import eigs
+from networkx.algorithms import community
 
 def average_degree(graph: nx.Graph):
     return 2 * len(graph.edges) / len(graph.nodes)
@@ -9,7 +9,10 @@ def transitivity(graph: nx.Graph):
     return nx.transitivity(graph)
 
 def eigenvector_centrality(graph):
-    ec = nx.eigenvector_centrality(graph)
+    try:
+        ec = nx.eigenvector_centrality(graph)
+    except nx.exception.PowerIterationFailedConvergence:
+        return np.nan
     return sum(ec.values()) / len(graph.nodes)
 
 def coreness(graph: nx.Graph):
@@ -30,8 +33,8 @@ def shortest_path_and_eccentricity(graph: nx.Graph):
     return average_spl_by_node, ecc_by_node
 
 def modularity(graph: nx.Graph):
-    partitions = [p for p in nx.algorithms.community.louvain_partitions(graph)]
-    return nx.algorithms.community.modularity(graph, communities=partitions[0])
+    partitions = [p for p in community.louvain_partitions(graph)]
+    return community.modularity(graph, communities=partitions[0])
 
 # TODO: implement
 def global_average_link_distance(graph: nx.Graph):

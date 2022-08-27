@@ -7,6 +7,7 @@ import time
 
 import pandas as pd
 import numpy as np
+from geopy.distance import geodesic
 import networkx as nx
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
@@ -20,16 +21,19 @@ from helpers import *
 ## Constants
 
 # TODO: Convert these to command line flags
-DROP_PCT = 90
-SAVE_LINKS = 1
-SAVE_CORRS = 0
+DROP_PCT = 80
 SAVE_PRECIPITATION = 1
-SAVE_METRICS = 1
+SAVE_LINKS = 1
+SAVE_METRICS = 0
 SAVE_MAP_IMAGES = 0
-CREATE_GRAPHS = 1
-PLOT_GRAPHS = 0
-ANALYSED_DT_LIMIT = 0
+CALCUALTE_METRICS = 0
+PLOT_GRAPHS = 1
+ANALYSED_DT_LIMIT = 1
+# LINK_STR_GEO_PENALTY = 1/20000
+LINK_STR_GEO_PENALTY = 0
 LINK_STR_THRESHOLD = 2.8
+EDGE_DENSITY = 0.005
+# EDGE_DENSITY = None
 AVG_LOOKBACK_MONTHS = 12
 LAG_MONTHS = 6
 
@@ -38,12 +42,20 @@ OUTPUTS_DIR = 'data/outputs'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 PREC_DATA_FILE = f'{DATA_DIR}/dataframe_drop_{DROP_PCT}.pkl'
-TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics_drop_{DROP_PCT}_thr_' + \
-    f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
-SPATIAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_{DROP_PCT}_thr_' + \
-    f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
-SEASONAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/seasonal_metrics_drop_{DROP_PCT}_thr_' + \
-    f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
+if EDGE_DENSITY:
+    TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics_drop_{DROP_PCT}_ed_' + \
+        f'{str(EDGE_DENSITY).replace(".", "p")}.pkl'
+    SPATIAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_{DROP_PCT}_ed_' + \
+        f'{str(EDGE_DENSITY).replace(".", "p")}.pkl'
+    SEASONAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/seasonal_metrics_drop_{DROP_PCT}_ed_' + \
+        f'{str(EDGE_DENSITY).replace(".", "p")}.pkl'
+else:
+    TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics_drop_{DROP_PCT}_thr_' + \
+        f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
+    SPATIAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_{DROP_PCT}_thr_' + \
+        f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
+    SEASONAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/seasonal_metrics_drop_{DROP_PCT}_thr_' + \
+        f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
 
 YEARS = range(2000, 2022)
 MONTHS = range(1, 13)
@@ -53,7 +65,6 @@ MONTHS = range(1, 13)
 
 def build_link_str_df(df: pd.DataFrame, start_time=None):
     link_str_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
-    corrs_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
     df = df.reset_index().set_index(['lat', 'lon'])
     for i, idx1 in enumerate(df.index):
         if start_time and i % 25 == 0:
@@ -64,9 +75,9 @@ def build_link_str_df(df: pd.DataFrame, start_time=None):
             # Calculate covariance matrix from both unlagged and lagged sequences
             seq_1_list = [seq_1[LAG_MONTHS :]]
             seq_2_list = [seq_2[LAG_MONTHS :]]
-            for i in range(-1, -1 - LAG_MONTHS, -1):
-                seq_1_offset = seq_1[i + LAG_MONTHS : i]
-                seq_2_offset = seq_2[i + LAG_MONTHS : i]
+            for k in range(-1, -1 - LAG_MONTHS, -1):
+                seq_1_offset = seq_1[k + LAG_MONTHS : k]
+                seq_2_offset = seq_2[k + LAG_MONTHS : k]
                 seq_1_list.append(seq_1_offset)
                 seq_2_list.append(seq_2_offset)
             # seq_list contains [seq_1_L0, seq_1_L1, ..., seq_2_L0, seq_2_L1, ...]
@@ -78,14 +89,13 @@ def build_link_str_df(df: pd.DataFrame, start_time=None):
             # and (seq_2_L0, seq_1_L1), (seq_2_L0, seq_1_L2), ...
             corrs = np.abs([*cov_mat[LAG_MONTHS + 1 :, 0],
                 *cov_mat[LAG_MONTHS + 1, 1 : LAG_MONTHS + 1]])
-            if SAVE_CORRS:
-                corrs_df.at[idx1, idx2] = corrs
             # Calculate link strength from correlations as documented
             link_str = (np.max(corrs) - np.mean(corrs)) / np.std(corrs)
-            link_str_df.at[idx1, idx2] = link_str
+            geodesic_km = geodesic(idx1, idx2).km
+            link_str_df.at[idx1, idx2] = link_str - LINK_STR_GEO_PENALTY * geodesic_km
     # link_str_df is upper triangular
     link_str_df = link_str_df.add(link_str_df.T, fill_value=0).fillna(0)
-    return link_str_df, corrs_df
+    return link_str_df
 
 def create_graph(adjacency: pd.DataFrame):
     graph = nx.from_numpy_matrix(adjacency.values)
@@ -200,33 +210,35 @@ def main():
                 analysed_dt_count += 1
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
                 month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
-                links_file = f'{DATA_DIR}/link_str_drop_{DROP_PCT}_{dt.year}_{month_str}.pkl'
-                corrs_file = f'{DATA_DIR}/corrs_drop_{DROP_PCT}_{dt.year}_{month_str}.pkl'
-                # TODO: Allow reading in correlations file
+                links_file = f'{DATA_DIR}/link_str_drop_{DROP_PCT}_{dt.year}_{month_str}'
+                if LINK_STR_GEO_PENALTY:
+                    links_file += f'_geo_pen_{str(int(1 / LINK_STR_GEO_PENALTY))}'
+                links_file += '.pkl'
                 if Path(links_file).is_file():
                     print(f'{date_summary}: reading link strength data from pickle file {links_file}')
                     link_str_df: pd.DataFrame = pd.read_pickle(links_file)
                 else:
                     print(f'\n{date_summary}: calculating link strength data...')
                     start = datetime.now()
-                    link_str_df, corrs_df = build_link_str_df(location_df, start)
+                    link_str_df = build_link_str_df(location_df, start)
                     print(f'{date_summary}: correlations and link strengths calculated; time elapsed: {datetime.now() - start}')
                     if SAVE_LINKS:
                         print(f'{date_summary}: saving link strength data to pickle file {links_file}')
                         link_str_df.to_pickle(links_file)
-                    if SAVE_CORRS:
-                        print(f'{date_summary}: saving correlation data to pickle file {corrs_file}')
-                        corrs_df.to_pickle(corrs_file)
 
-                if not CREATE_GRAPHS:
-                    continue
                 adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
-                adjacency[link_str_df >= LINK_STR_THRESHOLD] = 1
+                if EDGE_DENSITY:
+                    threshold = np.quantile(link_str_df, 1 - EDGE_DENSITY)
+                else:
+                    threshold = LINK_STR_THRESHOLD
+                adjacency[link_str_df >= threshold] = 1
                 graph = create_graph(adjacency)
                 graphs.append(graph)
                 graph_times.append(dt)
                 if PLOT_GRAPHS:
                     plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
+                if not CALCUALTE_METRICS:
+                    continue
                 if Path(TIME_METRICS_DATA_FILE).is_file():
                     continue
                 print(f'{date_summary}: calculating graph metrics...')
@@ -241,7 +253,7 @@ def main():
                     },
                 })
 
-    if not CREATE_GRAPHS:
+    if not CALCUALTE_METRICS:
         return
 
     # Output for time metrics
@@ -269,13 +281,16 @@ def main():
     if Path(SPATIAL_METRICS_DATA_FILE).is_file() and Path(SEASONAL_METRICS_DATA_FILE).is_file():
         print('Reading spatial metrics from pickle files '
             f'{SPATIAL_METRICS_DATA_FILE} and {SEASONAL_METRICS_DATA_FILE}')
-        with open(SPATIAL_METRICS_DATA_FILE, 'rb') as f:
-            spatial_metrics_dict = pickle.load(f)
+        spatial_metrics_df = pd.read_pickle(SPATIAL_METRICS_DATA_FILE)
         with open(SEASONAL_METRICS_DATA_FILE, 'rb') as f:
             seasonal_metrics_dict = pickle.load(f)
     else:
         start = datetime.now()
+        spatial_metrics_array_full = []
         for g, dt in zip(graphs, graph_times):
+            # Type hints
+            g: nx.Graph = g
+            dt: datetime = dt
             date_summary = f'{dt.year}, {dt.strftime("%b")}'
             print(f'{date_summary}: calculating spatial metrics...')
             if dt.month in [12, 1, 2]:
@@ -286,32 +301,44 @@ def main():
                 season = 'winter'
             else:
                 season = 'spring'
-            # Type hints
-            g: nx.Graph = g
-            dt: datetime = dt
             average_shortest_path, eccentricity = shortest_path_and_eccentricity(graph)
             clustering = nx.clustering(g)
-            eigenvector_centrality = nx.eigenvector_centrality(g)
+            try:
+                eigenvector_centrality = nx.eigenvector_centrality(g)
+            except nx.exception.PowerIterationFailedConvergence:
+                eigenvector_centrality = {k: np.nan for k in g.nodes}
             degree_centrality = nx.degree_centrality(g)
             def set_metrics(_dict):
-                _dict['degree'].append(g.degree[node])
-                _dict['average_shortest_path'].append(average_shortest_path[node])
                 _dict['eccentricity'].append(eccentricity[node])
-                _dict['clustering'].append(clustering[node])
-                _dict['eigenvector_centrality'].append(eigenvector_centrality[node])
+                _dict['average_shortest_path'].append(average_shortest_path[node])
+                _dict['degree'].append(g.degree[node])
                 _dict['degree_centrality'].append(degree_centrality[node])
+                _dict['eigenvector_centrality'].append(eigenvector_centrality[node])
+                _dict['clustering'].append(clustering[node])
                 return _dict
+            spatial_metrics_array = []
+            # TODO: rework seasonal output to be like summary output
             for node in graphs[0]:
                 spatial_metrics_dict[node] = set_metrics(spatial_metrics_dict[node])
                 seasonal_metrics_dict[season][node] = set_metrics(seasonal_metrics_dict[season][node])
+                spatial_metrics_array.extend([
+                    eccentricity[node],
+                    average_shortest_path[node],
+                    g.degree[node],
+                    degree_centrality[node],
+                    eigenvector_centrality[node],
+                    clustering[node],
+                ])
+            spatial_metrics_array_full.append(spatial_metrics_array)
+            index = pd.MultiIndex.from_product([list(graphs[0]), spatial_metrics])
+        spatial_metrics_df = pd.DataFrame(spatial_metrics_array_full, index=graph_times, columns=index)
 
         print(f'Spatial metrics calculated; time elapsed: {datetime.now() - start}')
 
     # Output for spatial metrics
     if SAVE_METRICS and not Path(SPATIAL_METRICS_DATA_FILE).is_file():
         print(f'Saving spatial metrics to pickle file {SPATIAL_METRICS_DATA_FILE}')
-        with open(SPATIAL_METRICS_DATA_FILE, 'wb') as f:
-            pickle.dump(spatial_metrics_dict, f)
+        spatial_metrics_df.to_pickle(SPATIAL_METRICS_DATA_FILE)
     if SAVE_METRICS and not Path(SEASONAL_METRICS_DATA_FILE).is_file():
         print(f'Saving seasonal spatial metrics to pickle file {SEASONAL_METRICS_DATA_FILE}')
         with open(SEASONAL_METRICS_DATA_FILE, 'wb') as f:
