@@ -1,20 +1,32 @@
 import pickle
+import math
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
 DROP_PCT = 50
-LINK_STR_THRESHOLD = 2.8
-OUTPUTS_DIR = 'data/outputs'
-TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics_drop_{DROP_PCT}_thr_' + \
-    f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
-AGG_TYPE = 'raw'
-AGG_CUTOFF = 15
-EMA_HALF_LIFE = 3
+METRICS_DIR = 'data/outputs'
+# TIME_METRICS_DATA_FILE = f'{METRICS_DIR}/time_metrics_drop_90_thr_2p8.pkl'
+# TIME_METRICS_DATA_FILE = f'{METRICS_DIR}/time_metrics_drop_90_ed_0p005.pkl'
+TIME_METRICS_DATA_FILE = f'{METRICS_DIR}/time_metrics_drop_50_ed_0p025.pkl'
+AGG_TYPE = None
+AGG_CUTOFF = 5
+EMA_HALF_LIFE = 2
 
-metrics = ['average_degree', 'coreness', 'modularity', 'transitivity',
-    'average_link_strength', 'eigenvector_centrality', 'shortest_path', 'eccentricity']
+# metrics = ['average_degree', 'coreness', 'transitivity', 'shortest_path', 'eccentricity',
+#     'eigenvector_centrality', 'betweenness_centrality', 'closeness_centrality',
+#     'louvain_partitions', 'greedy_modularity_partitions', 'asyn_lpa_partitions',
+#     'louvain_modularity', 'greedy_modularity_modularity', 'asyn_lpa_modularity',
+#     'average_link_strength']
+
+metrics = [
+    'shortest_path', 'eigenvector_centrality',
+    'betweenness_centrality', 'closeness_centrality',
+    'louvain_partitions', 'louvain_modularity',
+    'greedy_modularity_partitions', 'greedy_modularity_modularity',
+    'asyn_lpa_partitions', 'asyn_lpa_modularity'
+]
 
 def main():
     with open(TIME_METRICS_DATA_FILE, 'rb') as f:
@@ -43,25 +55,18 @@ def main():
             df[f'{m}_agg'] = df[m]
 
     # Construct figures for time series metrics
-    figure, axes = plt.subplots(4, 2)
+    figure, axes = plt.subplots(math.ceil(len(metrics) / 2), 2)
+    axes = axes.flatten()
     graph_times =  [m['dt'] for m in time_metrics_list]
-    axes[0, 0].set_title('Average degree')
-    axes[0, 0].plot(graph_times, df['average_degree_agg'], '-b')
-    axes[1, 0].set_title('Coreness')
-    axes[1, 0].plot(graph_times, df['coreness_agg'], '-g')
-    axes[2, 0].set_title('Modularity')
-    axes[2, 0].plot(graph_times, df['modularity_agg'], '-r')
-    axes[3, 0].set_title('Transitivity')
-    axes[3, 0].plot(graph_times, df['transitivity_agg'], '-m')
-    axes[0, 1].set_title('Link strength')
-    axes[0, 1].plot(graph_times, df['average_link_strength_agg'], '-k')
-    axes[1, 1].set_title('Eigenvector centrality')
-    axes[1, 1].plot(graph_times, df['eigenvector_centrality_agg'], '-y')
-    axes[2, 1].set_title('Shortest path')
-    axes[2, 1].plot(graph_times, df['shortest_path_agg'], '-', color='tab:orange')
-    axes[3, 1].set_title('Eccentricity')
-    axes[3, 1].plot(graph_times, df['eccentricity_agg'], '-', color='tab:cyan')
-    plt.savefig(f'{OUTPUTS_DIR}/graph_plots_drop_{DROP_PCT}.png')
+    colours = ['grey', '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#bcbd22', '#17becf', 'black']
+    for i, m in enumerate(metrics):
+        colour = colours[i % len(colours)]
+        axes[i].plot(graph_times, df[f'{m}_agg'],'-', color=colour)
+        axes[i].set_title(m)
+    figure.set_size_inches(32, 18)
+    filename = f'images/graph_plots_drop_{DROP_PCT}.png'
+    plt.savefig(filename, bbox_inches='tight')
     plt.show()
 
 main()

@@ -21,27 +21,34 @@ from helpers import *
 ## Constants
 
 # TODO: Convert these to command line flags
-DROP_PCT = 80
+DROP_PCT = 50
 SAVE_PRECIPITATION = 1
-SAVE_LINKS = 1
-SAVE_METRICS = 0
-SAVE_MAP_IMAGES = 0
-CALCUALTE_METRICS = 0
-PLOT_GRAPHS = 1
-ANALYSED_DT_LIMIT = 1
+SAVE_LINKS = 0
+CALCUALTE_METRICS = 1
+SAVE_METRICS = 1
+SAVE_MAP_HTML = 0
+PLOT_GRAPHS = 0
+ANALYSED_DT_LIMIT = 0
 # LINK_STR_GEO_PENALTY = 1/20000
 LINK_STR_GEO_PENALTY = 0
-LINK_STR_THRESHOLD = 2.8
-EDGE_DENSITY = 0.005
+LINK_STR_THRESHOLD = 4
+EDGE_DENSITY = 0.025
 # EDGE_DENSITY = None
-AVG_LOOKBACK_MONTHS = 12
-LAG_MONTHS = 6
+# AVG_LOOKBACK_MONTHS = 12
+# LAG_MONTHS = 6
+
+YEARS = range(2000, 2022)
+# MONTHS = range(1, 13)
+
+AVG_LOOKBACK_MONTHS = 48
+LAG_MONTHS = 12
+MONTHS = [1]
 
 DATA_DIR = 'data/precipitation'
 OUTPUTS_DIR = 'data/outputs'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
-PREC_DATA_FILE = f'{DATA_DIR}/dataframe_drop_{DROP_PCT}.pkl'
+PREC_DATA_FILE = f'{DATA_DIR}/dataframe_drop_{DROP_PCT}_alm_{AVG_LOOKBACK_MONTHS}_lag_{LAG_MONTHS}.pkl'
 if EDGE_DENSITY:
     TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics_drop_{DROP_PCT}_ed_' + \
         f'{str(EDGE_DENSITY).replace(".", "p")}.pkl'
@@ -56,9 +63,6 @@ else:
         f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
     SEASONAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/seasonal_metrics_drop_{DROP_PCT}_thr_' + \
         f'{str(LINK_STR_THRESHOLD).replace(".", "p")}.pkl'
-
-YEARS = range(2000, 2022)
-MONTHS = range(1, 13)
 
 
 ## Helper functions
@@ -128,21 +132,30 @@ def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
     _map.drawstates(linewidth=0.2)
     _map.drawcoastlines(linewidth=3)
     plt.tight_layout()
-    plt.savefig('./map_1.png', format='png', dpi=300)
     plt.show()
 
 def calculate_network_metrics(graph):
     shortest_paths, eccentricities = shortest_path_and_eccentricity(graph)
+    _partitions = partitions(graph)
+    lcc_graph = graph.subgraph(max(nx.connected_components(graph), key=len)).copy()
     return {
         'average_degree': average_degree(graph),
         'transitivity': transitivity(graph),
-        'eigenvector_centrality': eigenvector_centrality(graph),
         'coreness': coreness(graph),
-        'average_degree': average_degree(graph),
-        'global_average_link_distance': global_average_link_distance(graph),
-        'modularity': modularity(graph),
+        # 'global_average_link_distance': global_average_link_distance(graph),
         'shortest_path': np.average(list(shortest_paths.values())),
         'eccentricity': np.average(list(eccentricities.values())),
+        # Centrality
+        'eigenvector_centrality': eigenvector_centrality(graph),
+        'betweenness_centrality': betweenness_centrality(graph),
+        'closeness_centrality': closeness_centrality(graph),
+        # Partitions/modularity
+        'louvain_partitions': len(_partitions['louvain']),
+        'louvain_modularity': modularity(lcc_graph, _partitions['louvain']),
+        'greedy_modularity_partitions': len(_partitions['greedy_modularity']),
+        'greedy_modularity_modularity': modularity(lcc_graph, _partitions['greedy_modularity']),
+        'asyn_lpa_partitions': len(_partitions['asyn_lpa']),
+        'asyn_lpa_modularity': modularity(lcc_graph, _partitions['asyn_lpa']),
     }
 
 def prepare_prec_df(input_df):
@@ -229,12 +242,18 @@ def main():
                 adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
                 if EDGE_DENSITY:
                     threshold = np.quantile(link_str_df, 1 - EDGE_DENSITY)
+                    print(f'{date_summary}: fixed edge density {EDGE_DENSITY} gives threshold {threshold}')
                 else:
                     threshold = LINK_STR_THRESHOLD
                 adjacency[link_str_df >= threshold] = 1
+                if not EDGE_DENSITY:
+                    edge_density = np.sum(np.sum(adjacency)) / adjacency.size
+                    print(f'{date_summary}: fixed threshold {LINK_STR_THRESHOLD} gives edge density {edge_density}')
                 graph = create_graph(adjacency)
                 graphs.append(graph)
                 graph_times.append(dt)
+                partition_sizes = {k: len(v) for k, v in partitions(graph).items()}
+                print(f'{date_summary}: Graph partitions: {partition_sizes}')
                 if PLOT_GRAPHS:
                     plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
                 if not CALCUALTE_METRICS:
@@ -266,7 +285,8 @@ def main():
     lats = []
     lons = []
     spatial_metrics = ['eccentricity', 'average_shortest_path', 'degree',
-        'degree_centrality', 'eigenvector_centrality', 'clustering']
+        'degree_centrality', 'eigenvector_centrality', 'closeness_centrality',
+        'betweenness_centrality', 'clustering']
     spatial_metrics_dict = {}
     seasons = ['summer', 'autumn', 'winter', 'spring']
     seasonal_metrics_dict = {season: {} for season in seasons}
@@ -301,19 +321,23 @@ def main():
                 season = 'winter'
             else:
                 season = 'spring'
-            average_shortest_path, eccentricity = shortest_path_and_eccentricity(graph)
+            average_shortest_path, eccentricity = shortest_path_and_eccentricity(g)
             clustering = nx.clustering(g)
             try:
                 eigenvector_centrality = nx.eigenvector_centrality(g)
             except nx.exception.PowerIterationFailedConvergence:
                 eigenvector_centrality = {k: np.nan for k in g.nodes}
             degree_centrality = nx.degree_centrality(g)
+            closeness_centrality = nx.closeness_centrality(g)
+            betweenness_centrality = nx.betweenness_centrality(g)
             def set_metrics(_dict):
                 _dict['eccentricity'].append(eccentricity[node])
                 _dict['average_shortest_path'].append(average_shortest_path[node])
                 _dict['degree'].append(g.degree[node])
-                _dict['degree_centrality'].append(degree_centrality[node])
                 _dict['eigenvector_centrality'].append(eigenvector_centrality[node])
+                _dict['degree_centrality'].append(degree_centrality[node])
+                _dict['closeness_centrality'].append(closeness_centrality[node])
+                _dict['betweenness_centrality'].append(betweenness_centrality[node])
                 _dict['clustering'].append(clustering[node])
                 return _dict
             spatial_metrics_array = []
@@ -327,6 +351,8 @@ def main():
                     g.degree[node],
                     degree_centrality[node],
                     eigenvector_centrality[node],
+                    closeness_centrality[node],
+                    betweenness_centrality[node],
                     clustering[node],
                 ])
             spatial_metrics_array_full.append(spatial_metrics_array)
@@ -345,28 +371,22 @@ def main():
             pickle.dump(seasonal_metrics_dict, f)
 
     # Construct HTML files with spatial metric plots
-    for m in spatial_metrics:
-        # Lower than average latitude to include Tasmania
-        map = folium.Map(location=[np.average(lats) - 3, np.average(lons)], zoom_start=5)
-        values = [np.average(v[m]) for v in spatial_metrics_dict.values()]
-        heatmap = folium.plugins.HeatMap(
-            list(zip(lats, lons, values)),
-            min_opacity=0.3,
-            radius=30,
-            blur=30,
-            max_zoom=1,
-        )
-        map_file = f'{OUTPUTS_DIR}/{m}_drop_{DROP_PCT}.html'
-        heatmap.add_to(map)
-        map.save(map_file)
-        print(f'Map file {map_file} saved!')
-        if SAVE_MAP_IMAGES:
-            image_file = f'{OUTPUTS_DIR}/{m}_drop_{DROP_PCT}.png'
-            with webdriver.Firefox() as driver:
-                driver.get(f'{os.getcwd()}\\{map_file}')
-                time.sleep(1)
-                driver.save_screenshot(image_file)
-            print(f'Image file {image_file} saved!')
+    if SAVE_MAP_HTML:
+        for m in spatial_metrics:
+            # Lower than average latitude to include Tasmania
+            map = folium.Map(location=[np.average(lats) - 3, np.average(lons)], zoom_start=5)
+            values = [np.average(v[m]) for v in spatial_metrics_dict.values()]
+            heatmap = folium.plugins.HeatMap(
+                list(zip(lats, lons, values)),
+                min_opacity=0.3,
+                radius=30,
+                blur=30,
+                max_zoom=1,
+            )
+            map_file = f'{OUTPUTS_DIR}/{m}_drop_{DROP_PCT}.html'
+            heatmap.add_to(map)
+            map.save(map_file)
+            print(f'Map file {map_file} saved!')
 
 if __name__ == '__main__':
     start = datetime.now()
