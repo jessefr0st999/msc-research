@@ -1,6 +1,7 @@
 import networkx as nx
 import numpy as np
 from networkx.algorithms import community
+from mpl_toolkits.basemap import Basemap
 
 def average_degree(graph: nx.Graph):
     return 2 * len(graph.edges) / len(graph.nodes)
@@ -39,3 +40,20 @@ def modularity(graph: nx.Graph):
 # TODO: implement
 def global_average_link_distance(graph: nx.Graph):
     return None
+
+def get_map(axis=None):
+    _map = Basemap(
+        projection='merc',
+        llcrnrlon=110,
+        llcrnrlat=-45,
+        urcrnrlon=155,
+        urcrnrlat=-10,
+        lat_ts=0,
+        resolution='l',
+        suppress_ticks=True,
+        ax=axis,
+    )
+    _map.drawcountries(linewidth=3)
+    _map.drawstates(linewidth=0.2)
+    _map.drawcoastlines(linewidth=3)
+    return _map

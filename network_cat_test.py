@@ -6,16 +6,16 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from networkx.algorithms import community
-from mpl_toolkits.basemap import Basemap
+from helpers import get_map
 
-# threshold = 3.1
-EDGE_DENSITY = 0.025
+DATA_DIR = 'data/precipitation'
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--prec_file', default='dataframe_drop_0_alm_12_lag_0.pkl')
     parser.add_argument('--link_str_file', default='link_str_drop_0_alm_12_lag_0_2006_01.pkl')
-    parser.add_argument('--edge_density', type=int, default=0.005)
+    parser.add_argument('--edge_density', type=float, default=0.005)
+    parser.add_argument('--num_af_communities', type=int, default=6)
     args = parser.parse_args()
 
     prec_df = pd.read_pickle(f'{DATA_DIR}/{args.prec_file}')
@@ -33,11 +33,13 @@ def main():
     lcc_graph = graph.subgraph(max(nx.connected_components(graph), key=len)).copy()
     lv_partitions = [p for p in community.louvain_communities(lcc_graph)]
     gm_partitions = [p for p in community.greedy_modularity_communities(lcc_graph)]
+    af_partitions = [p for p in community.asyn_fluidc(lcc_graph, args.num_af_communities)]
     # al_partitions = [p for p in community.asyn_lpa_communities(lcc_graph, seed=0)]
     colours = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
         '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
     lv_node_colours = []
     gm_node_colours = []
+    af_node_colours = []
     for n in lcc_graph.nodes:
         for i, p in enumerate(lv_partitions):
             if n in p:
@@ -47,29 +49,19 @@ def main():
             if n in p:
                 gm_node_colours.append(colours[i % len(colours)])
                 break
+        for i, p in enumerate(af_partitions):
+            if n in p:
+                af_node_colours.append(colours[i % len(colours)])
+                break
 
-    def get_map(axis):
-        _map = Basemap(
-            projection='merc',
-            llcrnrlon=110,
-            llcrnrlat=-45,
-            urcrnrlon=155,
-            urcrnrlat=-10,
-            lat_ts=0,
-            resolution='l',
-            suppress_ticks=True,
-            ax=axis,
-        )
-        _map.drawcountries(linewidth=3)
-        _map.drawstates(linewidth=0.2)
-        _map.drawcoastlines(linewidth=3)
-        return _map
-
-    figure, axes = plt.subplots(1, 2)
+    figure, axes = plt.subplots(1, 3)
+    axes = axes.flatten()
     axes[0].set_title('lv_partitions')
     axes[1].set_title('gm_partitions')
+    axes[2].set_title(f'af_partitions, {args.num_af_communities} communities')
     lv_map = get_map(axes[0])
     gm_map = get_map(axes[1])
+    af_map = get_map(axes[2])
     mx, my = lv_map(location_df['lon'], location_df['lat'])
     pos = {}
     for i, elem in enumerate(adjacency.index):
@@ -80,13 +72,19 @@ def main():
     nx.draw_networkx_nodes(G=lcc_graph, pos=pos, nodelist=lcc_graph.nodes(),
         node_color=gm_node_colours, alpha=0.8, ax=axes[1],
         node_size=[40 + 3*adjacency[location].sum() for location in lcc_graph.nodes()])
+    nx.draw_networkx_nodes(G=lcc_graph, pos=pos, nodelist=lcc_graph.nodes(),
+        node_color=af_node_colours, alpha=0.8, ax=axes[2],
+        node_size=[40 + 3*adjacency[location].sum() for location in lcc_graph.nodes()])
     nx.draw_networkx_edges(G=lcc_graph, pos=pos, edge_color='gray',
         alpha=0.2, arrows=False, ax=axes[0])
     nx.draw_networkx_edges(G=lcc_graph, pos=pos, edge_color='gray',
         alpha=0.2, arrows=False, ax=axes[1])
+    nx.draw_networkx_edges(G=lcc_graph, pos=pos, edge_color='gray',
+        alpha=0.2, arrows=False, ax=axes[2])
     plt.tight_layout()
     figure.set_size_inches(32, 18)
-    filename = f'images/communities_{args.link_str_file.split("link_str_")[1]}.png'
+    filename = (f'images/communities_ed_{str(args.edge_density).replace(".", "p")}'
+        f'_{args.link_str_file.split("link_str_")[1]}.png')
     plt.savefig(filename, bbox_inches='tight')
     print(f'Saved to file {filename}')
     # plt.show()

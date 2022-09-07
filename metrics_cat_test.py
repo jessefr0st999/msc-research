@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colors, animation
-from mpl_toolkits.basemap import Basemap
+from helpers import get_map
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
@@ -36,22 +36,6 @@ lon_start = 110
 lon_end = 155
 lat_start = -45
 lat_end = -10
-
-def get_map():
-    _map = Basemap(
-        projection='merc',
-        llcrnrlon=lon_start,
-        llcrnrlat=lat_start,
-        urcrnrlon=lon_end,
-        urcrnrlat=lat_end,
-        lat_ts=0,
-        resolution='l',
-        suppress_ticks=True,
-    )
-    _map.drawcountries(linewidth=3)
-    _map.drawstates(linewidth=0.2)
-    _map.drawcoastlines(linewidth=3)
-    return _map
 
 def prepare_averaged_df(df: pd.DataFrame):
     df = df.mean().unstack()
@@ -109,7 +93,7 @@ def main():
             train_data = np.array(averaged_df)
             kmeans = KMeans(n_clusters=FIXED_CATEGORIES, random_state=0).fit(train_data)
         map_df = calculate_map_df(averaged_df, kmeans)
-        summary_map = get_map()
+        summary_map = get_map(axis)
         _cmap = cmap(num_categories)
         _bounds = bounds(num_categories)
         norm = colors.BoundaryNorm(_bounds, _cmap.N)
@@ -124,7 +108,7 @@ def main():
         figure = plt.figure()
         for i, season in enumerate(seasons, start=1):
             axis = figure.add_subplot(2, 2, i)
-            season_map = get_map()
+            season_map = get_map(axis)
             df = pd.DataFrame.from_dict(seasonal_metrics_dict[season])
             averaged_df = df.T.reset_index()
             for m in spatial_metrics:
@@ -156,7 +140,7 @@ def main():
     if SHOW_ANIMATION:
         anim_fps = 8
         anim_secs = 30
-        summary_map = get_map()
+        summary_map = get_map(axis)
 
         # map_dfs = []
         # df_series = prepare_df_series(df)

@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
-from mpl_toolkits.basemap import Basemap
+from helpers import get_map
 
 OUTPUTS_DIR = 'data/outputs'
 # DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics_drop_90_thr_2p8.pkl'
@@ -29,23 +29,6 @@ def prepare_df_series(df: pd.DataFrame):
 def main():
     full_df = pd.read_pickle(DATA_FILE)
     df_series = prepare_df_series(full_df)
-
-    def get_map(axis=None):
-        _map = Basemap(
-            projection='merc',
-            llcrnrlon=110,
-            llcrnrlat=-45,
-            urcrnrlon=155,
-            urcrnrlat=-10,
-            lat_ts=0,
-            resolution='l',
-            suppress_ticks=True,
-            ax=axis,
-        )
-        _map.drawcountries(linewidth=3)
-        _map.drawstates(linewidth=0.2)
-        _map.drawcoastlines(linewidth=3)
-        return _map
 
     def prepare_figure():
         figure, axes = plt.subplots(2, 3)
