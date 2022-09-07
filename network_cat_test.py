@@ -13,16 +13,18 @@ EDGE_DENSITY = 0.025
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--year', type=int, default=2006)
+    parser.add_argument('--prec_file', default='dataframe_drop_0_alm_12_lag_0.pkl')
+    parser.add_argument('--link_str_file', default='link_str_drop_0_alm_12_lag_0_2006_01.pkl')
+    parser.add_argument('--edge_density', type=int, default=0.005)
     args = parser.parse_args()
 
-    prec_file = 'data/precipitation/dataframe_drop_50.pkl'
-    prec_df = pd.read_pickle(prec_file)
-    location_df = prec_df.loc[datetime(args.year, 1, 1)]
-    link_str_file = f'data/precipitation/link_str_drop_50_{args.year}_01.pkl'
-    link_str_df = pd.read_pickle(link_str_file)
-    threshold = np.quantile(link_str_df, 1 - EDGE_DENSITY)
-    print(f'Fixed edge density {EDGE_DENSITY} gives threshold {threshold}')
+    prec_df = pd.read_pickle(f'{DATA_DIR}/{args.prec_file}')
+    link_str_df = pd.read_pickle(f'{DATA_DIR}/{args.link_str_file}')
+    date_part = args.link_str_file.split('lag_')[1].split('.pkl')[0]
+    _, year, month = date_part.split('_')
+    location_df = prec_df.loc[datetime(int(year), int(month), 1)]
+    threshold = np.quantile(link_str_df, 1 - args.edge_density)
+    print(f'Fixed edge density {args.edge_density} gives threshold {threshold}')
     adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
     adjacency[link_str_df >= threshold] = 1
     graph = nx.from_numpy_matrix(adjacency.values)
@@ -84,7 +86,7 @@ def main():
         alpha=0.2, arrows=False, ax=axes[1])
     plt.tight_layout()
     figure.set_size_inches(32, 18)
-    filename = f'images/communities_January_{args.year}.png'
+    filename = f'images/communities_{args.link_str_file.split("link_str_")[1]}.png'
     plt.savefig(filename, bbox_inches='tight')
     print(f'Saved to file {filename}')
     # plt.show()

@@ -66,45 +66,48 @@ def main():
 
     ## Helper functions
 
-    # TODO: speed this up
+    # TODO: speed this up for lagged
     def build_link_str_df(df: pd.DataFrame, start_time=None):
-        link_str_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
-        df = df.reset_index().set_index(['lat', 'lon'])
-        for i, idx1 in enumerate(df.index):
-            if start_time and i % 25 == 0:
-                print(f'{i} / {len(df.index)} points correlated; time elapsed: {datetime.now() - start_time}')
-            for j, idx2 in enumerate(df.index[i + 1:]):
-                seq_1 = df.at[idx1, 'prec_seq']
-                seq_2 = df.at[idx2, 'prec_seq']
-                # Calculate covariance matrix from both unlagged and lagged sequences
-                seq_1_list = [seq_1[args.lag_months :]]
-                seq_2_list = [seq_2[args.lag_months :]]
-                for k in range(-1, -1 - args.lag_months, -1):
-                    seq_1_offset = seq_1[k + args.lag_months : k]
-                    seq_2_offset = seq_2[k + args.lag_months : k]
-                    seq_1_list.append(seq_1_offset)
-                    seq_2_list.append(seq_2_offset)
-                # seq_list contains [seq_1_L0, seq_1_L1, ..., seq_2_L0, seq_2_L1, ...]
-                seq_list = [*seq_1_list, *seq_2_list]
-                # Covariance matrix will have 2 * (args.lag_months + 1) rows and columns
-                cov_mat = np.corrcoef(seq_list)
-                # Extract coefficients corresponding to
-                # (seq_1_L0, seq_2_L0), (seq_1_L0, seq_2_L1), (seq_1_L0, seq_2_L2), ...
-                # and (seq_2_L0, seq_1_L1), (seq_2_L0, seq_1_L2), ...
-                corrs = np.abs([*cov_mat[args.lag_months + 1 :, 0],
-                    *cov_mat[args.lag_months + 1, 1 : args.lag_months + 1]])
-                # Calculate link strength from correlations as documented
-                if args.lag_months:
+        if args.lag_months:
+            link_str_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
+            for i, idx1 in enumerate(df.index):
+                if start_time and i % 25 == 0:
+                    print(f'{i} / {len(df.index)} points correlated; time elapsed: {datetime.now() - start_time}')
+                for j, idx2 in enumerate(df.index[i + 1:]):
+                    seq_1 = df.at[idx1, 'prec_seq']
+                    seq_2 = df.at[idx2, 'prec_seq']
+                    # Calculate covariance matrix from both unlagged and lagged sequences
+                    seq_1_list = [seq_1[args.lag_months :]]
+                    seq_2_list = [seq_2[args.lag_months :]]
+                    for k in range(-1, -1 - args.lag_months, -1):
+                        seq_1_offset = seq_1[k + args.lag_months : k]
+                        seq_2_offset = seq_2[k + args.lag_months : k]
+                        seq_1_list.append(seq_1_offset)
+                        seq_2_list.append(seq_2_offset)
+                    # seq_list contains [seq_1_L0, seq_1_L1, ..., seq_2_L0, seq_2_L1, ...]
+                    seq_list = [*seq_1_list, *seq_2_list]
+                    # Covariance matrix will have 2 * (args.lag_months + 1) rows and columns
+                    cov_mat = np.corrcoef(seq_list)
+                    # Extract coefficients corresponding to
+                    # (seq_1_L0, seq_2_L0), (seq_1_L0, seq_2_L1), (seq_1_L0, seq_2_L2), ...
+                    # and (seq_2_L0, seq_1_L1), (seq_2_L0, seq_1_L2), ...
+                    corrs = np.abs([*cov_mat[args.lag_months + 1 :, 0],
+                        *cov_mat[args.lag_months + 1, 1 : args.lag_months + 1]])
+                    # Calculate link strength from correlations as documented in De Castro Santos
                     link_str = (np.max(corrs) - np.mean(corrs)) / np.std(corrs)
-                else:
-                    link_str = corrs[0]
-                if args.link_str_geo_penalty:
-                    geodesic_km = geodesic(idx1, idx2).km
-                    link_str_df.at[idx1, idx2] = link_str - args.link_str_geo_penalty * geodesic_km
-                else:
-                    link_str_df.at[idx1, idx2] = link_str
-        # link_str_df is upper triangular
-        link_str_df = link_str_df.add(link_str_df.T, fill_value=0).fillna(0)
+                    if args.link_str_geo_penalty:
+                        geodesic_km = geodesic(idx1, idx2).km
+                        link_str_df.at[idx1, idx2] = link_str - args.link_str_geo_penalty * geodesic_km
+                    else:
+                        link_str_df.at[idx1, idx2] = link_str
+            # link_str_df is upper triangular
+            link_str_df = link_str_df.add(link_str_df.T, fill_value=0).fillna(0)
+        else:
+            cov_mat = np.corrcoef([list(l) for l in np.array(df['prec_seq'])])
+            # Don't want self-joined nodes; set diagonal values to 0
+            np.fill_diagonal(cov_mat, 0)
+            link_str_df = pd.DataFrame(cov_mat, index=[df['lat'], df['lon']],
+                columns=[df['lat'], df['lon']])
         return link_str_df
 
     def create_graph(adjacency: pd.DataFrame):
@@ -225,7 +228,7 @@ def main():
                 analysed_dt_count += 1
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
                 month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
-                links_file = f'{DATA_DIR}/link_str_drop_{args.drop_pct}_{dt.year}_{month_str}'
+                links_file = f'{DATA_DIR}/link_str_drop_{args.drop_pct}_alm_{args.avg_lookback_months}_lag_{args.lag_months}_{dt.year}_{month_str}'
                 if args.link_str_geo_penalty:
                     links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
                 links_file += '.pkl'
