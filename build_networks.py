@@ -19,8 +19,10 @@ from helpers import *
 ## Constants
 
 YEARS = range(2000, 2022)
-# MONTHS = range(1, 13)
-MONTHS = [1]
+MONTHS = range(1, 13)
+# MONTHS = [1]
+LINK_STR_METHOD = None
+# LINK_STR_METHOD = 'max'
 
 
 def main():
@@ -66,48 +68,49 @@ def main():
 
     ## Helper functions
 
-    # TODO: speed this up for lagged
-    def build_link_str_df(df: pd.DataFrame, start_time=None):
+    def calculate_link_str(df: pd.DataFrame, method) -> pd.Series:
+        if method == 'max':
+            return df.max(axis=1)
+        # Default: as in De Castro Santos
+        return (df.max(axis=1) - df.mean(axis=1)) / df.std(axis=1)
+
+    def build_link_str_df(df: pd.DataFrame):
+        tuple_df_key_kwargs = dict(index=[df['lat'], df['lon']],
+            columns=[df['lat'], df['lon']])
+        str_df_key_kwargs = dict(index=[f'{r["lat"]}_{r["lon"]}_1' for i, r in df.iterrows()],
+            columns=[f'{r["lat"]}_{r["lon"]}_2' for i, r in df.iterrows()])
         if args.lag_months:
-            link_str_df = pd.DataFrame(index=[df['lat'], df['lon']], columns=[df['lat'], df['lon']])
-            for i, idx1 in enumerate(df.index):
-                if start_time and i % 25 == 0:
-                    print(f'{i} / {len(df.index)} points correlated; time elapsed: {datetime.now() - start_time}')
-                for j, idx2 in enumerate(df.index[i + 1:]):
-                    seq_1 = df.at[idx1, 'prec_seq']
-                    seq_2 = df.at[idx2, 'prec_seq']
-                    # Calculate covariance matrix from both unlagged and lagged sequences
-                    seq_1_list = [seq_1[args.lag_months :]]
-                    seq_2_list = [seq_2[args.lag_months :]]
-                    for k in range(-1, -1 - args.lag_months, -1):
-                        seq_1_offset = seq_1[k + args.lag_months : k]
-                        seq_2_offset = seq_2[k + args.lag_months : k]
-                        seq_1_list.append(seq_1_offset)
-                        seq_2_list.append(seq_2_offset)
-                    # seq_list contains [seq_1_L0, seq_1_L1, ..., seq_2_L0, seq_2_L1, ...]
-                    seq_list = [*seq_1_list, *seq_2_list]
-                    # Covariance matrix will have 2 * (args.lag_months + 1) rows and columns
-                    cov_mat = np.corrcoef(seq_list)
-                    # Extract coefficients corresponding to
-                    # (seq_1_L0, seq_2_L0), (seq_1_L0, seq_2_L1), (seq_1_L0, seq_2_L2), ...
-                    # and (seq_2_L0, seq_1_L1), (seq_2_L0, seq_1_L2), ...
-                    corrs = np.abs([*cov_mat[args.lag_months + 1 :, 0],
-                        *cov_mat[args.lag_months + 1, 1 : args.lag_months + 1]])
-                    # Calculate link strength from correlations as documented in De Castro Santos
-                    link_str = (np.max(corrs) - np.mean(corrs)) / np.std(corrs)
-                    if args.link_str_geo_penalty:
-                        geodesic_km = geodesic(idx1, idx2).km
-                        link_str_df.at[idx1, idx2] = link_str - args.link_str_geo_penalty * geodesic_km
-                    else:
-                        link_str_df.at[idx1, idx2] = link_str
-            # link_str_df is upper triangular
-            link_str_df = link_str_df.add(link_str_df.T, fill_value=0).fillna(0)
+            link_str_df = pd.DataFrame(pd.DataFrame(**str_df_key_kwargs).unstack())
+            n = len(df.index)
+            for i, lag in enumerate(range(-1, -1 - args.lag_months, -1)):
+                unlagged = [list(l[args.lag_months :]) for l in np.array(df['prec_seq'])]
+                lagged = [list(l[lag + args.lag_months : lag]) for l in np.array(df['prec_seq'])]
+                combined = [*unlagged, *lagged]
+                cov_mat = np.abs(np.corrcoef(combined))
+                # Don't want self-joined nodes; set diagonal values to 0
+                np.fill_diagonal(cov_mat, 0)
+                # Get the correlations between the unlagged series at both locations
+                if i == 0:
+                    loc_1_unlag_loc_2_unlag_slice = cov_mat[0 : n, 0 : n]
+                    slice_df = pd.DataFrame(loc_1_unlag_loc_2_unlag_slice, **str_df_key_kwargs).unstack()
+                    link_str_df['s1_lag_0_s2_lag_0'] = slice_df
+                # Between lagged series at location 1 and unlagged series at location 2
+                loc_1_lag_loc_2_unlag_slice = cov_mat[n : 2 * n, 0 : n]
+                slice_df = pd.DataFrame(loc_1_lag_loc_2_unlag_slice, **str_df_key_kwargs).unstack()
+                link_str_df[f's1_lag_{-lag}_s2_lag_0'] = slice_df
+                # Between unlagged series at location 1 and lagged series at location 2
+                loc_1_unlag_loc_2_lag_slice = cov_mat[0 : n, n : 2 * n]
+                slice_df = pd.DataFrame(loc_1_unlag_loc_2_lag_slice, **str_df_key_kwargs).unstack()
+                link_str_df[f's1_lag_0_s2_lag_{-lag}'] = slice_df
+            link_str_df = link_str_df.drop(columns=[0])
+            link_str_df = calculate_link_str(link_str_df, LINK_STR_METHOD)
+            link_str_df = link_str_df.unstack()
+            link_str_df = pd.DataFrame(np.array(link_str_df), **tuple_df_key_kwargs)
         else:
-            cov_mat = np.corrcoef([list(l) for l in np.array(df['prec_seq'])])
-            # Don't want self-joined nodes; set diagonal values to 0
+            unlagged = [list(l) for l in np.array(df['prec_seq'])]
+            cov_mat = np.abs(np.corrcoef(unlagged))
             np.fill_diagonal(cov_mat, 0)
-            link_str_df = pd.DataFrame(cov_mat, index=[df['lat'], df['lon']],
-                columns=[df['lat'], df['lon']])
+            link_str_df = pd.DataFrame(cov_mat, **tuple_df_key_kwargs)
         return link_str_df
 
     def create_graph(adjacency: pd.DataFrame):
@@ -252,8 +255,8 @@ def main():
                     threshold = args.link_str_threshold
                 adjacency[link_str_df >= threshold] = 1
                 if not args.edge_density:
-                    args.edge_density = np.sum(np.sum(adjacency)) / adjacency.size
-                    print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {args.edge_density}')
+                    _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
+                    print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
                 graph = create_graph(adjacency)
                 graphs.append(graph)
                 graph_times.append(dt)
