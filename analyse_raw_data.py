@@ -48,6 +48,13 @@ def main():
     raw_df = pd.read_csv(DATA_FILE)
     df = prepare_indexed_df(raw_df, ['date', 'lat', 'lon'])
 
+    figure, axis = plt.subplots(1)
+    quantile_points = np.linspace(0, 1, 21)
+    quantiles = np.quantile(df['prec'], quantile_points)
+    axis.plot(quantile_points, quantiles, 'o-')
+    axis.set_title('quantiles')
+    save_or_show(figure, 'stats_quantiles.png', args.save_fig)
+
     date_group = df.groupby('date').prec
     date_mean = date_group.mean()
     date_std = date_group.std()
