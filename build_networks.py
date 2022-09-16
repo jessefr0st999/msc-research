@@ -10,17 +10,13 @@ from geopy.distance import geodesic
 import networkx as nx
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
-import folium
-import folium.plugins
 
 from helpers import *
 
 
 ## Constants
 
-YEARS = range(2000, 2022)
-MONTHS = range(1, 13)
-# MONTHS = [1]
+YEARS = list(range(2000, 2022 + 1))
 LINK_STR_METHOD = None
 # LINK_STR_METHOD = 'max'
 
@@ -28,22 +24,25 @@ LINK_STR_METHOD = None
 def main():
     parser = argparse.ArgumentParser()
     # Hyperparameters
-    parser.add_argument('--avg_lookback_months', type=int, default=12)
-    parser.add_argument('--lag_months', type=int, default=0)
+    parser.add_argument('--avg_lookback_months', '--alm', type=int, default=12)
+    parser.add_argument('--lag_months', '--lag', type=int, default=0)
     parser.add_argument('--edge_density', type=float, default=0.005)
     parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--link_str_geo_penalty', type=float, default=0)
-    parser.add_argument('--no_anti_corr', action='store_true', default=False)
+    parser.add_argument('--no_anti_corr', '--nac', action='store_true', default=False)
+    parser.add_argument('--deseasonalise', action='store_true', default=False)
+    parser.add_argument('--month', type=int, default=None)
+    # NOTE: This should not be used with lag
+    parser.add_argument('--exp_weight', type=float, default=None)
 
     # Input/output controls
     parser.add_argument('--save_precipitation', action='store_true', default=False)
     parser.add_argument('--save_links', action='store_true', default=False)
-    parser.add_argument('--calculate_metrics', action='store_true', default=False)
     parser.add_argument('--save_metrics', action='store_true', default=False)
     parser.add_argument('--save_map_html', action='store_true', default=False)
     parser.add_argument('--plot_graphs', action='store_true', default=False)
     parser.add_argument('--dt_limit', type=int, default=0)
-    parser.add_argument('--link_file_tag', default='')
+    parser.add_argument('--file_tag', default='')
 
     args = parser.parse_args()
 
@@ -51,29 +50,47 @@ def main():
     OUTPUTS_DIR = 'data/outputs'
     DATA_FILE = f'{DATA_DIR}/FusedData.csv'
     LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
-    PREC_DATA_FILE = f'{DATA_DIR}/dataframe_alm_{args.avg_lookback_months}_lag_{args.lag_months}.pkl'
+
+    base_file_name = f'_alm_{args.avg_lookback_months}'
+    if args.file_tag:
+        base_file_name = f'{args.file_tag}{base_file_name}'
+    if args.month:
+        month_str = str(args.month) if args.month >= 10 else f'0{args.month}'
+        base_file_name += f'_m{month_str}'
+    else:
+        base_file_name += f'_lag_{args.lag_months}'
+
+    PREC_DATA_FILE = f'{DATA_DIR}/dataframe{base_file_name}.pkl'
     if args.edge_density:
-        TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics{args.link_file_tag}' + \
-            f'_alm_{args.avg_lookback_months}_lag_{args.lag_months}_ed_' + \
-            f'{str(args.edge_density).replace(".", "p")}.pkl'
-        SPATIAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics{args.link_file_tag}' + \
-            f'_alm_{args.avg_lookback_months}_lag_{args.lag_months}_ed_' + \
-            f'{str(args.edge_density).replace(".", "p")}.pkl'
-        SEASONAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/seasonal_metrics{args.link_file_tag}' + \
-            f'_alm_{args.avg_lookback_months}_lag_{args.lag_months}_ed_' + \
+        METRICS_DATA_FILE = f'{OUTPUTS_DIR}/metrics{base_file_name}_ed_' + \
             f'{str(args.edge_density).replace(".", "p")}.pkl'
     else:
-        TIME_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/time_metrics{args.link_file_tag}' + \
-            f'_alm_{args.avg_lookback_months}_lag_{args.lag_months}_thr_' + \
+        METRICS_DATA_FILE = f'{OUTPUTS_DIR}/metrics{base_file_name}_thr_' + \
             f'{str(args.link_str_threshold).replace(".", "p")}.pkl'
-        SPATIAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/spatial_metrics{args.link_file_tag}' + \
-            f'_alm_{args.avg_lookback_months}_lag_{args.lag_months}_thr_' + \
-            f'{str(args.link_str_threshold).replace(".", "p")}.pkl'
-        SEASONAL_METRICS_DATA_FILE = f'{OUTPUTS_DIR}/seasonal_metrics{args.link_file_tag}' + \
-            f'_alm_{args.avg_lookback_months}_lag_{args.lag_months}_thr_' + \
-            f'{str(args.link_str_threshold).replace(".", "p")}.pkl'
+    if args.month:
+        months = [args.month]
+    else:
+        months = list(range(1, 13))
 
     ## Helper functions
+
+    def deseasonalise(df):
+        def row_func(row: pd.Series):
+            series_mean = row.mean()
+            for m in months:
+                month_series = row.loc[row.index.month == m]
+                # row.loc[row.index.month == m] = month_series.values / month_series.mean() * series_mean
+                row.loc[row.index.month == m] = month_series.values - month_series.mean() + series_mean
+            return row
+        return df.apply(row_func, axis=1)
+
+    def exp_weight(seq, k):
+        # k is the factor by which the start of the sequence is multiplied
+        t_seq = pd.Series(list(range(len(seq))))
+        exp_seq = np.exp(np.log(k) / (len(seq) - 1) * t_seq)
+        # Reverse the sequence
+        exp_seq = exp_seq[::-1]
+        return seq * exp_seq
 
     def calculate_link_str(df: pd.DataFrame, method) -> pd.Series:
         if method == 'max':
@@ -126,6 +143,7 @@ def main():
                 cov_mat = np.abs(np.corrcoef(unlagged))
             np.fill_diagonal(cov_mat, 0)
             link_str_df = pd.DataFrame(cov_mat, **tuple_df_key_kwargs)
+        # TODO: reimplement link_str_geo_penalty between pairs of points
         return link_str_df
 
     def create_graph(adjacency: pd.DataFrame):
@@ -183,25 +201,38 @@ def main():
             'greedy_modularity_modularity': modularity(lcc_graph, _partitions['greedy_modularity']),
             'asyn_lpa_partitions': len(_partitions['asyn_lpa']),
             'asyn_lpa_modularity': modularity(lcc_graph, _partitions['asyn_lpa']),
-        }
+        }, _partitions
 
     def prepare_prec_df(input_df):
         input_df.columns = pd.to_datetime(input_df.columns, format='D%Y.%m')
         df_locations = pd.read_csv(LOCATIONS_FILE)
         df = pd.concat([df_locations, input_df], axis=1)
-
         df = df.set_index(['Lat', 'Lon'])
+        if args.month:
+            df = df.loc[:, [c.month == args.month for c in df.columns]]
+        if args.deseasonalise:
+            df = deseasonalise(df)
         def seq_func(row: pd.Series):
+            # Places value at current timestamp at end of list
+            # Values decrease in time as the sequence goes left
             def func(start_date, end_date, r: pd.Series):
-                sequence = r[(r.index > start_date) & (r.index <= end_date)]
-                return list(sequence) if len(sequence) == args.avg_lookback_months + args.lag_months else None
+                sequence = list(r[(r.index > start_date) & (r.index <= end_date)])
+                seq_length = args.avg_lookback_months // 12 if args.month else args.avg_lookback_months + args.lag_months
+                if len(sequence) != seq_length:
+                    return None
+                if args.exp_weight:
+                    sequence = exp_weight(sequence, args.exp_weight)
+                return sequence
             vec_func = np.vectorize(func, excluded=['r'])
-            start_dates = [d - relativedelta(months=args.avg_lookback_months + args.lag_months) for d in row.index]
+            seq_lookback = args.avg_lookback_months if args.month else args.avg_lookback_months + args.lag_months
+            start_dates = [d - relativedelta(months=seq_lookback) for d in row.index]
             end_dates = [d for d in row.index]
             _row = vec_func(start_date=start_dates, end_date=end_dates, r=row)
             return pd.Series(_row, index=row.index)
         start = datetime.now()
         print('Constructing sequences...')
+        for i, row in df.iterrows():
+            seq_func(row)
         df = df.apply(seq_func, axis=1)
         print(f'Sequences constructed; time elapsed: {datetime.now() - start}')
         df = df.stack().reset_index()
@@ -219,12 +250,10 @@ def main():
             print(f'Saving precipitation data to pickle file {PREC_DATA_FILE}')
             df.to_pickle(PREC_DATA_FILE)
 
-    graphs = []
-    time_metrics_list = []
-    graph_times = []
+    metrics_list = []
     analysed_dt_count = 0
     for y in YEARS:
-        for m in MONTHS:
+        for m in months:
             if args.dt_limit and analysed_dt_count == args.dt_limit:
                 break
             dt = datetime(y, m, 1)
@@ -238,9 +267,10 @@ def main():
             if location_df is not None:
                 analysed_dt_count += 1
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
-                month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
-                links_file = (f'{DATA_DIR}/link_str{args.link_file_tag}_alm_{args.avg_lookback_months}'
-                    f'_lag_{args.lag_months}_{dt.year}_{month_str}')
+                links_file = (f'{DATA_DIR}/link_str{base_file_name}_{dt.year}')
+                if not args.month:
+                    month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
+                    links_file += f'_{month_str}'
                 if args.link_str_geo_penalty:
                     links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
                 links_file += '.pkl'
@@ -266,146 +296,28 @@ def main():
                 if not args.edge_density:
                     _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
                     print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
-                graph = create_graph(adjacency)
-                graphs.append(graph)
-                graph_times.append(dt)
-                partition_sizes = {k: len(v) for k, v in partitions(graph).items()}
-                print(f'{date_summary}: Graph partitions: {partition_sizes}')
                 if args.plot_graphs:
                     plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
-                if not args.calculate_metrics:
+                if not args.save_metrics:
                     continue
-                if Path(TIME_METRICS_DATA_FILE).is_file():
-                    continue
-                print(f'{date_summary}: calculating graph metrics...')
+                graph = create_graph(adjacency)
                 start = datetime.now()
-                graph_metrics = calculate_network_metrics(graph)
+                print(f'{date_summary}: calculating graph metrics...')
+                metrics, _partitions = calculate_network_metrics(graph)
+                partition_sizes = {k: len(v) for k, v in _partitions.items()}
+                print(f'{date_summary}: graph partitions: {partition_sizes}')
                 print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
-                time_metrics_list.append({
+                metrics_list.append({
                     'dt': dt,
-                    'graph_metrics': graph_metrics,
-                    'link_metrics': {
-                        'average_link_strength': np.average(link_str_df),
-                    },
+                    **metrics,
+                    'average_link_strength': np.average(link_str_df),
                 })
-
-    if not args.calculate_metrics:
-        return
 
     # Output for time metrics
     if args.save_metrics:
-        print(f'Saving time series metrics to pickle file {TIME_METRICS_DATA_FILE}')
-        with open(TIME_METRICS_DATA_FILE, 'wb') as f:
-            pickle.dump(time_metrics_list, f)
-
-    # Perform spatial analysis by averaging across timesteps
-    lats = []
-    lons = []
-    spatial_metrics = ['eccentricity', 'average_shortest_path', 'degree',
-        'degree_centrality', 'eigenvector_centrality', 'closeness_centrality',
-        'betweenness_centrality', 'clustering']
-    spatial_metrics_dict = {}
-    seasons = ['summer', 'autumn', 'winter', 'spring']
-    # seasonal_metrics_dict = {season: {} for season in seasons}
-    for node in graphs[0]:
-        spatial_metrics_dict[node] = {m: [] for m in spatial_metrics}
-        # for season in seasons:
-        #     seasonal_metrics_dict[season][node] = {m: [] for m in spatial_metrics}
-        lats.append(node[0])
-        lons.append(node[1])
-
-    # Input for spatial metrics
-    if Path(SPATIAL_METRICS_DATA_FILE).is_file() and Path(SEASONAL_METRICS_DATA_FILE).is_file():
-        print('Reading spatial metrics from pickle files '
-            f'{SPATIAL_METRICS_DATA_FILE} and {SEASONAL_METRICS_DATA_FILE}')
-        spatial_metrics_df = pd.read_pickle(SPATIAL_METRICS_DATA_FILE)
-        # with open(SEASONAL_METRICS_DATA_FILE, 'rb') as f:
-        #     seasonal_metrics_dict = pickle.load(f)
-    else:
-        start = datetime.now()
-        spatial_metrics_array_full = []
-        for g, dt in zip(graphs, graph_times):
-            # Type hints
-            g: nx.Graph = g
-            dt: datetime = dt
-            date_summary = f'{dt.year}, {dt.strftime("%b")}'
-            print(f'{date_summary}: calculating spatial metrics...')
-            if dt.month in [12, 1, 2]:
-                season = 'summer'
-            elif dt.month in [3, 4, 5]:
-                season = 'autumn'
-            elif dt.month in [6, 7, 8]:
-                season = 'winter'
-            else:
-                season = 'spring'
-            # average_shortest_path, eccentricity = shortest_path_and_eccentricity(g)
-            clustering = nx.clustering(g)
-            try:
-                eigenvector_centrality = nx.eigenvector_centrality(g)
-            except nx.exception.PowerIterationFailedConvergence:
-                eigenvector_centrality = {k: np.nan for k in g.nodes}
-            degree_centrality = nx.degree_centrality(g)
-            closeness_centrality = nx.closeness_centrality(g)
-            betweenness_centrality = nx.betweenness_centrality(g)
-            def set_metrics(_dict):
-                # _dict['eccentricity'].append(eccentricity[node])
-                # _dict['average_shortest_path'].append(average_shortest_path[node])
-                _dict['degree'].append(g.degree[node])
-                _dict['eigenvector_centrality'].append(eigenvector_centrality[node])
-                _dict['degree_centrality'].append(degree_centrality[node])
-                _dict['closeness_centrality'].append(closeness_centrality[node])
-                _dict['betweenness_centrality'].append(betweenness_centrality[node])
-                _dict['clustering'].append(clustering[node])
-                return _dict
-            spatial_metrics_array = []
-            # TODO: rework seasonal output to be like summary output
-            for node in graphs[0]:
-                spatial_metrics_dict[node] = set_metrics(spatial_metrics_dict[node])
-                # seasonal_metrics_dict[season][node] = set_metrics(seasonal_metrics_dict[season][node])
-                spatial_metrics_array.extend([
-                    # eccentricity[node],
-                    # average_shortest_path[node],
-                    g.degree[node],
-                    degree_centrality[node],
-                    eigenvector_centrality[node],
-                    closeness_centrality[node],
-                    betweenness_centrality[node],
-                    clustering[node],
-                ])
-            spatial_metrics_array_full.append(spatial_metrics_array)
-            index = pd.MultiIndex.from_product([list(graphs[0]), spatial_metrics])
-        spatial_metrics_df = pd.DataFrame(spatial_metrics_array_full, index=graph_times, columns=index)
-
-        print(f'Spatial metrics calculated; time elapsed: {datetime.now() - start}')
-
-    # Output for spatial metrics
-    if args.save_metrics and not Path(SPATIAL_METRICS_DATA_FILE).is_file():
-        print(f'Saving spatial metrics to pickle file {SPATIAL_METRICS_DATA_FILE}')
-        spatial_metrics_df.to_pickle(SPATIAL_METRICS_DATA_FILE)
-    # if args.save_metrics and not Path(SEASONAL_METRICS_DATA_FILE).is_file():
-    #     print(f'Saving seasonal spatial metrics to pickle file {SEASONAL_METRICS_DATA_FILE}')
-    #     with open(SEASONAL_METRICS_DATA_FILE, 'wb') as f:
-    #         pickle.dump(seasonal_metrics_dict, f)
-
-    # Construct HTML files with spatial metric plots
-    if args.save_map_html:
-        for m in spatial_metrics:
-            # Lower than average latitude to include Tasmania
-            map = folium.Map(location=[np.average(lats) - 3, np.average(lons)], zoom_start=5)
-            values = [np.average(v[m]) for v in spatial_metrics_dict.values()]
-            heatmap = folium.plugins.HeatMap(
-                list(zip(lats, lons, values)),
-                min_opacity=0.3,
-                radius=30,
-                blur=30,
-                max_zoom=1,
-            )
-            map_file = f'{OUTPUTS_DIR}/{m}{args.link_file_tag}' + \
-                f'_alm_{args.avg_lookback_months}_lag_{args.lag_months}_thr_' + \
-                f'{str(args.link_str_threshold).replace(".", "p")}.html'
-            heatmap.add_to(map)
-            map.save(map_file)
-            print(f'Map file {map_file} saved!')
+        print(f'Saving metrics of graphs to pickle file {METRICS_DATA_FILE}')
+        with open(METRICS_DATA_FILE, 'wb') as f:
+            pickle.dump(metrics_list, f)
 
 if __name__ == '__main__':
     start = datetime.now()

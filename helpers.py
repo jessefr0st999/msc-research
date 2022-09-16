@@ -11,10 +11,18 @@ def transitivity(graph: nx.Graph):
 
 def eigenvector_centrality(graph):
     try:
-        ec = nx.eigenvector_centrality(graph)
+        centrality = nx.eigenvector_centrality(graph)
     except nx.exception.PowerIterationFailedConvergence:
         return np.nan
-    return sum(ec.values()) / len(graph.nodes)
+    return sum(centrality.values()) / len(graph.nodes)
+
+def betweenness_centrality(graph):
+    centrality = nx.betweenness_centrality(graph)
+    return sum(centrality.values()) / len(graph.nodes)
+
+def closeness_centrality(graph):
+    centrality = nx.closeness_centrality(graph)
+    return sum(centrality.values()) / len(graph.nodes)
 
 def coreness(graph: nx.Graph):
     k_indices = nx.core_number(graph).values()
@@ -33,9 +41,18 @@ def shortest_path_and_eccentricity(graph: nx.Graph):
         average_spl_by_node[source_node] = np.average(list(target_nodes.values()))
     return average_spl_by_node, ecc_by_node
 
-def modularity(graph: nx.Graph):
-    partitions = [p for p in community.louvain_partitions(graph)]
-    return community.modularity(graph, communities=partitions[0])
+def partitions(graph: nx.Graph):
+    lcc_graph = graph.subgraph(max(nx.connected_components(graph), key=len)).copy()
+    return {
+        'louvain': [p for p in community.louvain_communities(lcc_graph)],
+        'greedy_modularity': [p for p in community.greedy_modularity_communities(lcc_graph)],
+        'asyn_lpa': [p for p in community.asyn_lpa_communities(lcc_graph, seed=0)],
+        # This one causes the script to hang for an ~1000 edge graph
+        # 'girvan_newman': [p for p in community.girvan_newman(lcc_graph)],
+    }
+
+def modularity(graph: nx.Graph, communities):
+    return community.modularity(graph, communities=communities)
 
 # TODO: implement
 def global_average_link_distance(graph: nx.Graph):
