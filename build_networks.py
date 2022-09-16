@@ -14,11 +14,13 @@ from mpl_toolkits.basemap import Basemap
 from helpers import *
 
 
-## Constants
-
 YEARS = list(range(2000, 2022 + 1))
 LINK_STR_METHOD = None
 # LINK_STR_METHOD = 'max'
+DATA_DIR = 'data/precipitation'
+OUTPUTS_DIR = 'data/outputs'
+DATA_FILE = f'{DATA_DIR}/FusedData.csv'
+LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 
 
 def main():
@@ -46,11 +48,6 @@ def main():
 
     args = parser.parse_args()
 
-    DATA_DIR = 'data/precipitation'
-    OUTPUTS_DIR = 'data/outputs'
-    DATA_FILE = f'{DATA_DIR}/FusedData.csv'
-    LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
-
     base_file_name = f'_alm_{args.avg_lookback_months}'
     if args.file_tag:
         base_file_name = f'{args.file_tag}{base_file_name}'
@@ -67,10 +64,7 @@ def main():
     else:
         METRICS_DATA_FILE = f'{OUTPUTS_DIR}/metrics{base_file_name}_thr_' + \
             f'{str(args.link_str_threshold).replace(".", "p")}.pkl'
-    if args.month:
-        months = [args.month]
-    else:
-        months = list(range(1, 13))
+    months = [args.month] if args.month else list(range(1, 13))
 
     ## Helper functions
 
@@ -231,8 +225,6 @@ def main():
             return pd.Series(_row, index=row.index)
         start = datetime.now()
         print('Constructing sequences...')
-        for i, row in df.iterrows():
-            seq_func(row)
         df = df.apply(seq_func, axis=1)
         print(f'Sequences constructed; time elapsed: {datetime.now() - start}')
         df = df.stack().reset_index()
@@ -261,57 +253,56 @@ def main():
                 location_df = df.loc[dt]
                 # Skip unless the sequence based on the specified lookback time is available
                 if location_df['prec_seq'].isnull().values.any():
-                    location_df = None
-            except KeyError:
-                location_df = None
-            if location_df is not None:
-                analysed_dt_count += 1
-                date_summary = f'{dt.year}, {dt.strftime("%b")}'
-                links_file = (f'{DATA_DIR}/link_str{base_file_name}_{dt.year}')
-                if not args.month:
-                    month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
-                    links_file += f'_{month_str}'
-                if args.link_str_geo_penalty:
-                    links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
-                links_file += '.pkl'
-                if Path(links_file).is_file():
-                    print(f'{date_summary}: reading link strength data from pickle file {links_file}')
-                    link_str_df: pd.DataFrame = pd.read_pickle(links_file)
-                else:
-                    print(f'\n{date_summary}: calculating link strength data...')
-                    start = datetime.now()
-                    link_str_df = build_link_str_df(location_df)
-                    print(f'{date_summary}: correlations and link strengths calculated; time elapsed: {datetime.now() - start}')
-                    if args.save_links:
-                        print(f'{date_summary}: saving link strength data to pickle file {links_file}')
-                        link_str_df.to_pickle(links_file)
-
-                adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
-                if args.edge_density:
-                    threshold = np.quantile(link_str_df, 1 - args.edge_density)
-                    print(f'{date_summary}: fixed edge density {args.edge_density} gives threshold {threshold}')
-                else:
-                    threshold = args.link_str_threshold
-                adjacency[link_str_df >= threshold] = 1
-                if not args.edge_density:
-                    _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
-                    print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
-                if args.plot_graphs:
-                    plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
-                if not args.save_metrics:
                     continue
-                graph = create_graph(adjacency)
+            except KeyError:
+                continue
+            analysed_dt_count += 1
+            date_summary = f'{dt.year}, {dt.strftime("%b")}'
+            links_file = (f'{DATA_DIR}/link_str{base_file_name}_{dt.year}')
+            if not args.month:
+                month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
+                links_file += f'_{month_str}'
+            if args.link_str_geo_penalty:
+                links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
+            links_file += '.pkl'
+            if Path(links_file).is_file():
+                print(f'{date_summary}: reading link strength data from pickle file {links_file}')
+                link_str_df: pd.DataFrame = pd.read_pickle(links_file)
+            else:
+                print(f'\n{date_summary}: calculating link strength data...')
                 start = datetime.now()
-                print(f'{date_summary}: calculating graph metrics...')
-                metrics, _partitions = calculate_network_metrics(graph)
-                partition_sizes = {k: len(v) for k, v in _partitions.items()}
-                print(f'{date_summary}: graph partitions: {partition_sizes}')
-                print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
-                metrics_list.append({
-                    'dt': dt,
-                    **metrics,
-                    'average_link_strength': np.average(link_str_df),
-                })
+                link_str_df = build_link_str_df(location_df)
+                print(f'{date_summary}: correlations and link strengths calculated; time elapsed: {datetime.now() - start}')
+                if args.save_links:
+                    print(f'{date_summary}: saving link strength data to pickle file {links_file}')
+                    link_str_df.to_pickle(links_file)
+
+            adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
+            if args.edge_density:
+                threshold = np.quantile(link_str_df, 1 - args.edge_density)
+                print(f'{date_summary}: fixed edge density {args.edge_density} gives threshold {threshold}')
+            else:
+                threshold = args.link_str_threshold
+            adjacency[link_str_df >= threshold] = 1
+            if not args.edge_density:
+                _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
+                print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
+            if args.plot_graphs:
+                plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
+            if not args.save_metrics:
+                continue
+            graph = create_graph(adjacency)
+            start = datetime.now()
+            print(f'{date_summary}: calculating graph metrics...')
+            metrics, _partitions = calculate_network_metrics(graph)
+            partition_sizes = {k: len(v) for k, v in _partitions.items()}
+            print(f'{date_summary}: graph partitions: {partition_sizes}')
+            print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
+            metrics_list.append({
+                'dt': dt,
+                **metrics,
+                'average_link_strength': np.average(link_str_df),
+            })
 
     # Output for time metrics
     if args.save_metrics:
