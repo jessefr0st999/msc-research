@@ -47,8 +47,8 @@ def main():
             f' k-means ({num_clusters} clusters, silhouette score {round(sil_score, 3)})')
         node_colours = [COLOURS[cluster] for cluster in kmeans.labels_]
         axis.set_title(title)
-        axis.scatter(mx, my, c=node_colours, cmap=cmap)
         if args.save_plots:
+            axis.scatter(mx, my, c=node_colours, cmap=cmap, s=150)
             figure.set_size_inches(32, 18)
             if not month:
                 filename_title = 'full_series'
@@ -56,10 +56,12 @@ def main():
                 filename_title = f'm{month}'
             else:
                 filename_title = f'm0{month}'
-            filename = f'images/clusters_over_time_{filename_title}_{args.min_year}_{args.max_year}.png'
+            cluster_title = f'fixed_{args.fixed_clusters}' if args.fixed_clusters else 'optimal'
+            filename = f'images/clusters_{cluster_title}_over_time_{filename_title}_{args.min_year}_{args.max_year}.png'
             print(f'Saving plot to file {filename}')
             plt.savefig(filename)
         else:
+            axis.scatter(mx, my, c=node_colours, cmap=cmap)
             plt.show()
         return num_clusters, kmeans, sil_score
 
