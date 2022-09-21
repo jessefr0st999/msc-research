@@ -16,18 +16,17 @@ DATA_DIR = 'data/precipitation'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 # Ordered to give "rainbow" of increasing precipitation values in clusters
-COLOURS = [
-    'grey', # lowest-valued cluster
-    'saddlebrown',
-    'blue',
-    'cyan',
-    'green',
-    'gold',
-    'orange',
-    'red',
-    'magenta',
-    'black', # highest-valued cluster
-]
+COLOURS = {
+    2: ['#aaa', 'red'],
+    3: ['#aaa', 'green', 'red'],
+    4: ['#aaa', 'green', 'orange', 'red'],
+    5: ['#aaa', '#666', 'green', 'orange', 'red'],
+    6: ['#aaa', '#666', 'cyan', 'green', 'orange', 'red'],
+    7: ['#aaa', '#666', 'blue', 'cyan', 'green', 'orange', 'red'],
+    8: ['#aaa', '#666', 'blue', 'cyan', 'green', 'gold', 'orange', 'red'],
+    9: ['#aaa', '#666', 'saddlebrown', 'blue', 'cyan', 'green', 'gold', 'orange', 'red'],
+    10: ['#aaa', '#666', 'saddlebrown', 'blue', 'cyan', 'green', 'gold', 'orange', 'red', 'magenta'],
+}
 
 def kmeans_optimise(train_data: np.array, max_clusters, constrain):
     sil_scores_dict = {}
@@ -95,7 +94,7 @@ def main():
                     cluster_sizes.append(len(cluster_slice))
                 permuted_colours = [0] * len(cluster_means)
                 for i_old, i_new in enumerate(np.argsort(cluster_means)):
-                    permuted_colours[i_new] = COLOURS[i_old]
+                    permuted_colours[i_new] = COLOURS[len(cluster_means)][i_old]
                     print(f'cluster ({i_old}, {permuted_colours[i_new]}):',
                         f'size = {round(cluster_sizes[i_new], 3)},',
                         f'mean = {round(cluster_means[i_new], 3)},',
