@@ -15,8 +15,19 @@ YEARS = list(range(2000, 2022 + 1))
 DATA_DIR = 'data/precipitation'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
-COLOURS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b',
-    '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', 'black', '#444', '#ccc']
+# Ordered to give "rainbow" of increasing precipitation values in clusters
+COLOURS = [
+    'grey', # lowest-valued cluster
+    'saddlebrown',
+    'blue',
+    'cyan',
+    'green',
+    'gold',
+    'orange',
+    'red',
+    'magenta',
+    'black', # highest-valued cluster
+]
 
 def kmeans_optimise(train_data: np.array, max_clusters, constrain):
     sil_scores_dict = {}
@@ -74,10 +85,26 @@ def main():
                 'sil_score': sil_score,
             })
             if args.plot_clusters:
-                node_colours = [COLOURS[cluster] for cluster in kmeans.labels_]
+                # Order the colours based on average precipitation in clusters
+                cluster_means, cluster_st_devs, cluster_sizes = [], [], []
+                for n in set(kmeans.labels_):
+                    cluster_indices = [i for i, label in enumerate(kmeans.labels_) if label == n]
+                    cluster_slice = location_df.iloc[cluster_indices]['prec']
+                    cluster_means.append(cluster_slice.mean())
+                    cluster_st_devs.append(cluster_slice.std())
+                    cluster_sizes.append(len(cluster_slice))
+                permuted_colours = [0] * len(cluster_means)
+                for i_old, i_new in enumerate(np.argsort(cluster_means)):
+                    permuted_colours[i_new] = COLOURS[i_old]
+                    print(f'cluster ({i_old}, {permuted_colours[i_new]}):',
+                        f'size = {round(cluster_sizes[i_new], 3)},',
+                        f'mean = {round(cluster_means[i_new], 3)},',
+                        f'st dev = {round(cluster_st_devs[i_new], 3)}',
+                    )
+                node_colours = [permuted_colours[cluster] for cluster in kmeans.labels_]
                 figure, axis = plt.subplots(1)
                 mx, my = get_map(axis)(lons, lats)
-                cmap = mpl.colors.ListedColormap([COLOURS[i] for i in range(num_clusters)])
+                cmap = mpl.colors.ListedColormap([permuted_colours[i] for i in range(num_clusters)])
                 title = f'{dt.strftime("%b")} {y}: k-means ({num_clusters} clusters, silhouette score {round(sil_score, 3)})'
                 axis.set_title(title)
                 axis.scatter(mx, my, c=node_colours, cmap=cmap)
