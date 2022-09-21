@@ -20,7 +20,9 @@ COLOURS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b',
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--fixed_clusters', type=int, default=None)
-    parser.add_argument('--max_clusters', type=int, default=10)
+    parser.add_argument('--max_clusters', type=int, default=8)
+    # Fraction of total number of points as upper bound on cluster size
+    parser.add_argument('--constrain', type=float, default=None)
     parser.add_argument('--min_year', type=int, default=2000)
     parser.add_argument('--max_year', type=int, default=2022)
     parser.add_argument('--save_plots', action='store_true', default=False)
@@ -38,7 +40,8 @@ def main():
             kmeans = KMeans(n_clusters=num_clusters, random_state=0).fit(train_data)
             sil_score = silhouette_score(train_data, kmeans.labels_)
         else:
-            num_clusters, kmeans, sil_score = kmeans_optimise(train_data, args.max_clusters)
+            num_clusters, kmeans, sil_score = kmeans_optimise(train_data,
+                args.max_clusters, args.constrain)
         figure, axis = plt.subplots(1)
         mx, my = get_map(axis)(lons, lats)
         cmap = mpl.colors.ListedColormap([COLOURS[i] for i in range(num_clusters)])
@@ -57,7 +60,7 @@ def main():
             else:
                 filename_title = f'm0{month}'
             cluster_title = f'fixed_{args.fixed_clusters}' if args.fixed_clusters else 'optimal'
-            filename = f'images/clusters_{cluster_title}_over_time_{filename_title}_{args.min_year}_{args.max_year}.png'
+            filename = f'images/clusters{"_constrained" if args.constrain else ""}_{cluster_title}_over_time_{filename_title}_{args.min_year}_{args.max_year}.png'
             print(f'Saving plot to file {filename}')
             plt.savefig(filename)
         else:

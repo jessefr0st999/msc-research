@@ -7,6 +7,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+from k_means_constrained import KMeansConstrained
 
 from helpers import get_map, prepare_indexed_df
 
@@ -17,15 +18,16 @@ LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 COLOURS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b',
     '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', 'black', '#444', '#ccc']
 
-def kmeans_optimise(train_data: np.array, max_clusters):
+def kmeans_optimise(train_data: np.array, max_clusters, constrain):
     sil_scores_dict = {}
     kmeans_dict = {}
     for n in range(2, max_clusters + 1):
-        kmeans_dict[n] = KMeans(n_clusters=n, random_state=0).fit(train_data)
+        if constrain:
+            kmeans_dict[n] = KMeansConstrained(n_clusters=n, random_state=0,
+                size_max=int(len(train_data) * constrain + 1)).fit(train_data)
+        else:
+            kmeans_dict[n] = KMeans(n_clusters=n, random_state=0).fit(train_data)
         sil_scores_dict[n] = silhouette_score(train_data, kmeans_dict[n].labels_)
-        # Incentivise more clusters
-        # TODO: Investigate this more
-        # sil_scores_dict[n] += np.sqrt(1 + n/75)
     optimal_num_clusters = max(sil_scores_dict, key=sil_scores_dict.get)
     return optimal_num_clusters, kmeans_dict[optimal_num_clusters], sil_scores_dict[optimal_num_clusters]
 
@@ -34,6 +36,8 @@ def main():
     parser.add_argument('--month', type=int, default=None)
     parser.add_argument('--fixed_clusters', type=int, default=None)
     parser.add_argument('--max_clusters', type=int, default=10)
+    # Fraction of total number of points as upper bound on cluster size
+    parser.add_argument('--constrain', type=float, default=None)
     parser.add_argument('--plot_clusters', action='store_true', default=False)
     parser.add_argument('--save_summary', action='store_true', default=False)
     parser.add_argument('--merged_summary', action='store_true', default=False)
@@ -61,7 +65,8 @@ def main():
                 sil_score = silhouette_score(train_data, kmeans.labels_)
                 print(f'{dt.strftime("%b")} {y}: silhouette score {sil_score} for {num_clusters} clusters')
             else:
-                num_clusters, kmeans, sil_score = kmeans_optimise(train_data, args.max_clusters)
+                num_clusters, kmeans, sil_score = kmeans_optimise(train_data,
+                    args.max_clusters, args.constrain)
                 print(f'{dt.strftime("%b")} {y}: {num_clusters} optimal clusters with silhouette score {sil_score}')
             summary_df.append({
                 'dt': dt,
@@ -116,7 +121,7 @@ def main():
             axis.plot(summary_df.index, summary_df['sil_score'])
         if args.save_summary:
             figure.set_size_inches(32, 18)
-            filename = f'images/clusters_fixed_{args.fixed_clusters}_{filename_title}.png'
+            filename = f'images/clusters{"_constrained" if args.constrain else ""}_fixed_{args.fixed_clusters}_{filename_title}.png'
             print(f'Saving summary to file {filename}')
             plt.savefig(filename)
     else:
@@ -146,7 +151,7 @@ def main():
             axes[1].plot(summary_df.index, summary_df['sil_score'])
         if args.save_summary:
             figure.set_size_inches(32, 18)
-            filename = f'images/clusters_optimal_{filename_title}.png'
+            filename = f'images/clusters{"_constrained" if args.constrain else ""}_optimal_{filename_title}.png'
             print(f'Saving summary to file {filename}')
             plt.savefig(filename)
     print(f'Average silhouette score: {summary_df["sil_score"].mean()}')
