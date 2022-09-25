@@ -41,6 +41,30 @@ def kmeans_optimise(train_data: np.array, max_clusters, constrain):
     optimal_num_clusters = max(sil_scores_dict, key=sil_scores_dict.get)
     return optimal_num_clusters, kmeans_dict[optimal_num_clusters], sil_scores_dict[optimal_num_clusters]
 
+def kmeans_optimise_gap(data, max_clusters, nrefs=5):
+    gaps_dict = {}
+    kmeans_dict = {}
+    # For n references, generate random sample and perform kmeans getting resulting dispersion of each loop
+    for n in range(2, max_clusters + 1):
+        # Holder for reference dispersion results
+        ref_disps = np.zeros(nrefs)
+        for i in range(nrefs):
+            # Create new random reference set
+            random_reference = np.random.random_sample(size=data.shape)
+            # Fit to it
+            km = KMeans(n_clusters=n)
+            km.fit(random_reference)
+            ref_disps[i] = km.inertia_
+        # Fit cluster to original data and create dispersion
+        kmeans_dict[n] = km = KMeans(n_clusters=n)
+        km.fit(data)
+        orig_disp = km.inertia_
+        # Calculate gap statistic
+        gap = np.log(np.mean(ref_disps)) - np.log(orig_disp)
+        gaps_dict[n] = gap
+    optimal_num_clusters = max(gaps_dict, key=gaps_dict.get)
+    return optimal_num_clusters, kmeans_dict[optimal_num_clusters], gaps_dict[optimal_num_clusters]
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--month', type=int, default=None)
@@ -48,6 +72,7 @@ def main():
     parser.add_argument('--max_clusters', type=int, default=10)
     # Fraction of total number of points as upper bound on cluster size
     parser.add_argument('--constrain', type=float, default=None)
+    parser.add_argument('--gap', action='store_true', default=False)
     parser.add_argument('--plot_clusters', action='store_true', default=False)
     parser.add_argument('--save_summary', action='store_true', default=False)
     parser.add_argument('--merged_summary', action='store_true', default=False)
@@ -75,9 +100,16 @@ def main():
                 sil_score = silhouette_score(train_data, kmeans.labels_)
                 print(f'{dt.strftime("%b")} {y}: silhouette score {sil_score} for {num_clusters} clusters')
             else:
-                num_clusters, kmeans, sil_score = kmeans_optimise(train_data,
-                    args.max_clusters, args.constrain)
-                print(f'{dt.strftime("%b")} {y}: {num_clusters} optimal clusters with silhouette score {sil_score}')
+                if args.gap:
+                    num_clusters, kmeans, gap = kmeans_optimise_gap(train_data,
+                        args.max_clusters)
+                    sil_score = silhouette_score(train_data, kmeans.labels_)
+                    print(f'{dt.strftime("%b")} {y}: {num_clusters} optimal clusters with silhouette score {sil_score}'
+                        f' and gap statistic {gap}')
+                else:
+                    num_clusters, kmeans, sil_score = kmeans_optimise(train_data,
+                        args.max_clusters, args.constrain)
+                    print(f'{dt.strftime("%b")} {y}: {num_clusters} optimal clusters with silhouette score {sil_score}')
             summary_df.append({
                 'dt': dt,
                 'num_clusters': num_clusters,
@@ -177,7 +209,7 @@ def main():
             axes[1].plot(summary_df.index, summary_df['sil_score'])
         if args.save_summary:
             figure.set_size_inches(32, 18)
-            filename = f'images/clusters{"_constrained" if args.constrain else ""}_optimal_{filename_title}.png'
+            filename = f'images/clusters{"_constrained" if args.constrain else ""}_optimal{"_gap" if args.gap else ""}_{filename_title}.png'
             print(f'Saving summary to file {filename}')
             plt.savefig(filename)
     print(f'Average silhouette score: {summary_df["sil_score"].mean()}')
