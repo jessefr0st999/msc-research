@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from helpers import get_map
+from helpers import get_map, prepare_indexed_df
 
 YEARS = range(2000, 2022)
 DATA_DIR = 'data/precipitation'
@@ -13,16 +13,6 @@ LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 size_func = lambda series: [500 * n for n in series]
 cmap = 'RdYlGn_r'
 
-def prepare_indexed_df(input_df, new_index='date'):
-    input_df.columns = pd.to_datetime(input_df.columns, format='D%Y.%m')
-    df_locations = pd.read_csv(LOCATIONS_FILE)
-    df = pd.concat([df_locations, input_df], axis=1)
-    df = df.set_index(['Lat', 'Lon'])
-    df = df.stack().reset_index()
-    df = df.rename(columns={'level_2': 'date', 0: 'prec', 'Lat': 'lat', 'Lon': 'lon'})
-    df = df.set_index(new_index)
-    return df
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output_folder', default=None)
@@ -30,7 +20,8 @@ def main():
     args = parser.parse_args()
 
     raw_df = pd.read_csv(DATA_FILE)
-    df = prepare_indexed_df(raw_df, ['lat', 'lon'])
+    locations_df = pd.read_csv(LOCATIONS_FILE)
+    df = prepare_indexed_df(raw_df, locations_df, new_index=['lat', 'lon'])
 
     pos = None
     if args.month:

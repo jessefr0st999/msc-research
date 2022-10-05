@@ -22,6 +22,40 @@ OUTPUTS_DIR = 'data/outputs'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 
+def create_graph(adjacency: pd.DataFrame):
+    graph = nx.from_numpy_matrix(adjacency.values)
+    graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
+    return graph
+
+def prepare_graph_plot(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats,
+        plot=True):
+    if graph is None:
+        graph = create_graph(adjacency)
+    _map = Basemap(
+        projection='merc',
+        llcrnrlon=110,
+        llcrnrlat=-45,
+        urcrnrlon=155,
+        urcrnrlat=-10,
+        lat_ts=0,
+        resolution='l',
+        suppress_ticks=True,
+    )
+    map_x, map_y = _map(lons, lats)
+    pos = {}
+    for i, elem in enumerate(adjacency.index):
+        pos[elem] = (map_x[i], map_y[i])
+    nx.draw_networkx_nodes(G=graph, pos=pos, nodelist=graph.nodes(),
+        node_color='r', alpha=0.8,
+        node_size=[adjacency[location].sum() for location in graph.nodes()])
+    nx.draw_networkx_edges(G=graph, pos=pos, edge_color='g',
+        alpha=0.2, arrows=False)
+    _map.drawcountries(linewidth=3)
+    _map.drawstates(linewidth=0.2)
+    _map.drawcoastlines(linewidth=3)
+    plt.tight_layout()
+    if plot:
+        plt.show()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -140,39 +174,6 @@ def main():
         # TODO: reimplement link_str_geo_penalty between pairs of points
         return link_str_df
 
-    def create_graph(adjacency: pd.DataFrame):
-        graph = nx.from_numpy_matrix(adjacency.values)
-        graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
-        return graph
-
-    def plot_graph(graph: nx.Graph, adjacency: pd.DataFrame, lons, lats):
-        if graph is None:
-            graph = create_graph(adjacency)
-        _map = Basemap(
-            projection='merc',
-            llcrnrlon=110,
-            llcrnrlat=-45,
-            urcrnrlon=155,
-            urcrnrlat=-10,
-            lat_ts=0,
-            resolution='l',
-            suppress_ticks=True,
-        )
-        map_x, map_y = _map(lons, lats)
-        pos = {}
-        for i, elem in enumerate(adjacency.index):
-            pos[elem] = (map_x[i], map_y[i])
-        nx.draw_networkx_nodes(G=graph, pos=pos, nodelist=graph.nodes(),
-            node_color='r', alpha=0.8,
-            node_size=[adjacency[location].sum() for location in graph.nodes()])
-        nx.draw_networkx_edges(G=graph, pos=pos, edge_color='g',
-            alpha=0.2, arrows=False)
-        _map.drawcountries(linewidth=3)
-        _map.drawstates(linewidth=0.2)
-        _map.drawcoastlines(linewidth=3)
-        plt.tight_layout()
-        plt.show()
-
     def calculate_network_metrics(graph):
         # shortest_paths, eccentricities = shortest_path_and_eccentricity(graph)
         _partitions = partitions(graph)
@@ -288,7 +289,7 @@ def main():
                 _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
                 print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
             if args.plot_graphs:
-                plot_graph(graph, adjacency, location_df['lon'], location_df['lat'])
+                prepare_graph_plot(graph, adjacency, location_df['lon'], location_df['lat'])
             if not args.save_metrics:
                 continue
             graph = create_graph(adjacency)

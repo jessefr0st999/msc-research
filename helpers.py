@@ -1,5 +1,6 @@
 import networkx as nx
 import numpy as np
+import pandas as pd
 from networkx.algorithms import community
 from mpl_toolkits.basemap import Basemap
 
@@ -70,7 +71,18 @@ def get_map(axis=None):
         suppress_ticks=True,
         ax=axis,
     )
-    _map.drawcountries(linewidth=3)
+    _map.drawcountries(linewidth=1)
     _map.drawstates(linewidth=0.2)
-    _map.drawcoastlines(linewidth=3)
+    _map.drawcoastlines(linewidth=1)
     return _map
+
+def prepare_indexed_df(raw_df, locations_df, month=None, new_index='date'):
+    raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')
+    df = pd.concat([locations_df, raw_df], axis=1)
+    df = df.set_index(['Lat', 'Lon'])
+    if month:
+        df = df.loc[:, [c.month == month for c in df.columns]]
+    df = df.stack().reset_index()
+    df = df.rename(columns={'level_2': 'date', 0: 'prec', 'Lat': 'lat', 'Lon': 'lon'})
+    df = df.set_index(new_index)
+    return df
