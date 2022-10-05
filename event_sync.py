@@ -24,9 +24,10 @@ def main():
     # tau_max for ES, del_tau for ECA
     parser.add_argument('--tau', type=int, default=12)
     parser.add_argument('--edge_density', type=float, default=0.005)
-    parser.add_argument('--col_quantile', type=float, default=0.95)
-    parser.add_argument('--df_quantile', type=float, default=0.95)
+    parser.add_argument('--col_quantile', '--cq', type=float, default=0.95)
+    parser.add_argument('--df_quantile', '--dq', type=float, default=0.95)
     parser.add_argument('--save_graph_folder', default=None)
+    parser.add_argument('--save_links', action='store_true', default=False)
     args = parser.parse_args()
 
     dot_to_p = lambda num: str(num).replace('.', 'p')
@@ -51,14 +52,15 @@ def main():
                 : datetime(args.end_year, args.end_month, 1)]
 
         event_df = pd.DataFrame(0, columns=df.columns, index=df.index)
-        extreme_column_events_df = pd.DataFrame(0, columns=df.columns, index=df.index)
-        for c in df.columns:
-            extreme_column_events_df[c][df[c] > np.quantile(df[c], args.col_quantile)] = 1
-        print(f'Number of extreme events over columns: {extreme_column_events_df.to_numpy().sum()}')
         event_df[df > np.quantile(df, args.df_quantile)] = 1
         print(f'Number of extreme events over whole dataframe: {event_df.to_numpy().sum()}')
-        event_df &= extreme_column_events_df
-        print(f'Number of merged extreme events: {event_df.to_numpy().sum()}')
+        if args.col_quantile:
+            extreme_column_events_df = pd.DataFrame(0, columns=df.columns, index=df.index)
+            for c in df.columns:
+                extreme_column_events_df[c][df[c] > np.quantile(df[c], args.col_quantile)] = 1
+            print(f'Number of extreme events over columns: {extreme_column_events_df.to_numpy().sum()}')
+            event_df &= extreme_column_events_df
+            print(f'Number of merged extreme events: {event_df.to_numpy().sum()}')
         event_array = np.array(event_df)
 
         n = event_array.shape[1]
