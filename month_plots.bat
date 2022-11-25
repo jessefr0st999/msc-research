@@ -1,0 +1,14 @@
+python month_plots.py --output_folder images --lat -35.25 --lon 138.5 --title adelaide
+python month_plots.py --output_folder images --lat -23.75 --lon 133.5 --title alice_springs
+python month_plots.py --output_folder images --lat -27.25 --lon 152.5 --title brisbane
+python month_plots.py --output_folder images --lat -17.75 --lon 122.5 --title broome
+python month_plots.py --output_folder images --lat -16.75 --lon 145.5 --title cairns
+python month_plots.py --output_folder images --lat -35.25 --lon 149.5 --title canberra
+python month_plots.py --output_folder images --lat -12.75 --lon 130.5 --title darwin
+python month_plots.py --output_folder images --lat -42.75 --lon 147.5 --title hobart
+python month_plots.py --output_folder images --lat -30.75 --lon 121.5 --title kalgoorlie
+python month_plots.py --output_folder images --lat -37.75 --lon 144.5 --title melbourne
+python month_plots.py --output_folder images --lat -20.75 --lon 139.5 --title mount_isa
+python month_plots.py --output_folder images --lat -31.75 --lon 116.5 --title perth
+python month_plots.py --output_folder images --lat -33.75 --lon 150.5 --title sydney
+python month_plots.py --output_folder images --lat -19.25 --lon 135.5 --title tennant_creek
