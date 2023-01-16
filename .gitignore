@@ -2,6 +2,7 @@
 .pgdata
 __pycache__
 data
+outputs
 basemap-*
 geckodriver*
 images/*
