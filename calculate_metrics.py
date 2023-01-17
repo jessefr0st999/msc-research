@@ -1,5 +1,4 @@
 from datetime import datetime
-import pickle
 import argparse
 
 import pandas as pd
@@ -14,6 +13,25 @@ DATA_DIR = 'data/precipitation'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 
+WHOLE_GRAPH_METRICS = [
+    'asyn_lpa_partitions',
+    'asyn_lpa_modularity',
+    'average_betweenness_centrality',
+    'average_closeness_centrality',
+    'average_coreness',
+    'average_degree',
+    'average_eccentricity',
+    'average_eigenvector_centrality',
+    'average_link_strength',
+    'average_shortest_path',
+    'global_average_link_distance',
+    'greedy_modularity_modularity',
+    'greedy_modularity_partitions',
+    'louvain_modularity',
+    'louvain_partitions',
+    'transitivity',
+]
+
 def create_graph(adjacency: pd.DataFrame):
     graph = nx.from_numpy_array(adjacency.values)
     graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
@@ -27,31 +45,20 @@ def main():
     parser.add_argument('--link_str_file_tag', default='alm_60_lag_0')
     args = parser.parse_args()
 
-    def calculate_network_metrics(graph):
-        # shortest_paths, eccentricities = shortest_path_and_eccentricity(graph)
-        _partitions = partitions(graph)
-        lcc_graph = graph.subgraph(max(nx.connected_components(graph), key=len)).copy()
-        return {
-            'average_degree': average_degree(graph),
-            'transitivity': transitivity(graph),
-            'coreness': coreness(graph),
-            # 'global_average_link_distance': global_average_link_distance(graph),
-            # 'shortest_path': np.average(list(shortest_paths.values())),
-            # 'eccentricity': np.average(list(eccentricities.values())),
-            # Centrality
-            'eigenvector_centrality': nx.eigenvector_centrality(graph),
-            'betweenness_centrality': nx.betweenness_centrality(graph),
-            'closeness_centrality': nx.closeness_centrality(graph),
-            # Partitions/modularity
-            'louvain_partitions': len(_partitions['louvain']),
-            'louvain_modularity': modularity(lcc_graph, _partitions['louvain']),
-            'greedy_modularity_partitions': len(_partitions['greedy_modularity']),
-            'greedy_modularity_modularity': modularity(lcc_graph, _partitions['greedy_modularity']),
-            'asyn_lpa_partitions': len(_partitions['asyn_lpa']),
-            'asyn_lpa_modularity': modularity(lcc_graph, _partitions['asyn_lpa']),
-        }, _partitions
-
-    metrics_list = []
+    prec_df = pd.read_csv(DATA_FILE)
+    prec_df.columns = pd.to_datetime(prec_df.columns, format='D%Y.%m')
+    locations_df = pd.read_csv(LOCATIONS_FILE).set_index(['Lat', 'Lon'])
+    whole_graph_metrics_df = pd.DataFrame(np.nan, index=prec_df.columns,
+        columns=WHOLE_GRAPH_METRICS)
+    create_empty_df = lambda: pd.DataFrame(np.nan, index=prec_df.columns,
+        columns=locations_df.index)
+    coreness_df = create_empty_df()
+    degree_df = create_empty_df()
+    eccentricity_df = create_empty_df()
+    shortest_path_df = create_empty_df()
+    betweenness_centrality_df = create_empty_df()
+    closeness_centrality_df = create_empty_df()
+    eigenvector_centrality_df = create_empty_df()
     for y in YEARS:
         for m in MONTHS:
             dt = datetime(y, m, 1)
@@ -77,23 +84,61 @@ def main():
 
             start = datetime.now()
             print(f'{date_summary}: calculating graph metrics...')
-            metrics, _partitions = calculate_network_metrics(graph)
+            # General
+            shortest_paths, eccentricities = shortest_path_and_eccentricity(graph)
+            coreness = nx.core_number(graph)
+            coreness_df.loc[dt] = coreness
+            degree_df.loc[dt] = dict(graph.degree)
+            eccentricity_df.loc[dt] = eccentricities
+            shortest_path_df.loc[dt] = shortest_paths
+            whole_graph_metrics_df.loc[dt, 'average_coreness'] = np.mean(list(coreness.values()))
+            whole_graph_metrics_df.loc[dt, 'average_degree'] = average_degree(graph)
+            whole_graph_metrics_df.loc[dt, 'average_eccentricity'] = np.mean(list(eccentricities.values()))
+            whole_graph_metrics_df.loc[dt, 'average_link_strength'] = np.average(link_str_df)
+            whole_graph_metrics_df.loc[dt, 'average_shortest_path'] = np.mean(list(shortest_paths.values()))
+            whole_graph_metrics_df.loc[dt, 'global_average_link_distance'] = global_average_link_distance(graph)
+            whole_graph_metrics_df.loc[dt, 'transitivity'] = nx.transitivity(graph)
+            # Partitions/modularity
+            _partitions = partitions(graph)
+            lcc_graph = graph.subgraph(max(nx.connected_components(graph), key=len)).copy()
+            whole_graph_metrics_df.loc[dt, 'asyn_lpa_partitions'] = len(_partitions['asyn_lpa'])
+            whole_graph_metrics_df.loc[dt, 'asyn_lpa_modularity'] = modularity(lcc_graph,
+                _partitions['asyn_lpa'])
+            whole_graph_metrics_df.loc[dt, 'greedy_modularity_partitions'] = len(_partitions['greedy_modularity'])
+            whole_graph_metrics_df.loc[dt, 'greedy_modularity_modularity'] = modularity(lcc_graph,
+                _partitions['greedy_modularity'])
+            whole_graph_metrics_df.loc[dt, 'louvain_partitions'] = len(_partitions['louvain'])
+            whole_graph_metrics_df.loc[dt, 'louvain_modularity'] = modularity(lcc_graph,
+                _partitions['louvain'])
+            # Centrality
+            bc = nx.betweenness_centrality(graph)
+            betweenness_centrality_df.loc[dt] = bc
+            whole_graph_metrics_df.loc[dt, 'average_betweenness_centrality'] = np.mean(list(bc.values()))
+            cc = nx.closeness_centrality(graph)
+            closeness_centrality_df.loc[dt] = cc
+            whole_graph_metrics_df.loc[dt, 'average_closeness_centrality'] = np.mean(list(cc.values()))
+            try:
+                ec = nx.eigenvector_centrality(graph)
+                eigenvector_centrality_df.loc[dt] = ec
+                whole_graph_metrics_df.loc[dt, 'average_eigenvector_centrality'] = np.mean(list(ec.values()))
+            except nx.exception.PowerIterationFailedConvergence:
+                print(f'PowerIterationFailedConvergence exception for {date_summary} eigenvector centrality')
             partition_sizes = {k: len(v) for k, v in _partitions.items()}
             print(f'{date_summary}: graph partitions: {partition_sizes}')
             print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
-            metrics_list.append({
-                'dt': dt,
-                **metrics,
-                'average_link_strength': np.average(link_str_df),
-            })
-
+            
     graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' if args.edge_density \
         else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
-    metrics_file = f'metrics_{args.link_str_file_tag}_{graph_file_tag}.pkl'
-    print(f'Saving metrics of graphs to pickle file {metrics_file}')
-    metrics_file = f'{args.output_folder}/{metrics_file}'
-    with open(metrics_file, 'wb') as f:
-        pickle.dump(metrics_list, f)
+    metrics_file_base = f'metrics_{args.link_str_file_tag}_{graph_file_tag}'
+    print(f'Saving metrics of graphs to pickle files with base {metrics_file_base}')
+    whole_graph_metrics_df.to_pickle(f'{args.output_folder}/{metrics_file_base}_whole.pkl')
+    coreness_df.to_pickle(f'{args.output_folder}/{metrics_file_base}_cor.pkl')
+    degree_df.to_pickle(f'{args.output_folder}/{metrics_file_base}_deg.pkl')
+    eccentricity_df.to_pickle(f'{args.output_folder}/{metrics_file_base}_ecc.pkl')
+    shortest_path_df.to_pickle(f'{args.output_folder}/{metrics_file_base}_sp.pkl')
+    betweenness_centrality_df.to_pickle(f'{args.output_folder}/{metrics_file_base}_b_cent.pkl')
+    closeness_centrality_df.to_pickle(f'{args.output_folder}/{metrics_file_base}_c_cent.pkl')
+    eigenvector_centrality_df.to_pickle(f'{args.output_folder}/{metrics_file_base}_e_cent.pkl')
 
 if __name__ == '__main__':
     start = datetime.now()
