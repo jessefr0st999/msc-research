@@ -160,7 +160,7 @@ def main():
         print(f'Reading precipitation sequences from pickle file {PREC_DATA_FILE}')
         prec_df: pd.DataFrame = pd.read_pickle(PREC_DATA_FILE)
     else:
-        print('Calculating precipitation sequences and saving to pickle file {PREC_DATA_FILE}')
+        print(f'Calculating precipitation sequences and saving to pickle file {PREC_DATA_FILE}')
         prec_df = prepare_prec_df(pd.read_csv(DATA_FILE))
         prec_df.to_pickle(PREC_DATA_FILE)
 

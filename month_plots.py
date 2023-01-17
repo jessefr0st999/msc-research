@@ -9,15 +9,26 @@ from helpers import get_map, prepare_indexed_df
 DATA_DIR = 'data/precipitation'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
-# Blue, orange, green, red, purple, brown, pink, light yellow, dark yellow, teal, black, grey
-COLOURS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b',
-    '#e377c2', '#ffff00', '#bcbd22', '#17becf', 'black', 'gray']
+COLOURS = [
+    'red',
+    'orange',
+    'yellow',
+    'lightgreen',
+    'green',
+    'cyan',
+    'blue',
+    'purple',
+    'brown',
+    'black',
+    'gray',
+    'magenta',
+]
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--title', default='melbourne')
-    parser.add_argument('--lat', type=float, default=-37.75)
-    parser.add_argument('--lon', type=float, default=144.5)
+    parser.add_argument('--title', default='sydney')
+    parser.add_argument('--lat', type=float, default=-33.75)
+    parser.add_argument('--lon', type=float, default=150.5)
     parser.add_argument('--output_folder', default=None)
     parser.add_argument('--all_locations', action='store_true', default=False)
     args = parser.parse_args()

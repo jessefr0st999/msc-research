@@ -1,33 +1,60 @@
 import networkx as nx
 import numpy as np
 import pandas as pd
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 from networkx.algorithms import community
 from mpl_toolkits.basemap import Basemap
+            
+def configure_plots(args):
+    label_size = 20 if args.output_folder else 10
+    font_size = 20 if args.output_folder else 10
+    mpl.rcParams['xtick.labelsize'] = label_size
+    mpl.rcParams['ytick.labelsize'] = label_size
+    mpl.rcParams.update({'font.size': font_size})
+    def show_or_save(figure, filename):
+        if args.output_folder:
+            figure.set_size_inches(32, 18)
+            plt.savefig(f'{args.output_folder}/{filename}', bbox_inches='tight')
+            print(f'Plot saved to file {args.output_folder}/{filename}!')
+        else:
+            plt.show()
+    return label_size, font_size, show_or_save
+
+def get_map(axis=None):
+    _map = Basemap(
+        projection='merc',
+        llcrnrlon=110,
+        llcrnrlat=-45,
+        urcrnrlon=155,
+        urcrnrlat=-10,
+        lat_ts=0,
+        resolution='l',
+        suppress_ticks=True,
+        ax=axis,
+    )
+    _map.drawcountries(linewidth=1)
+    _map.drawstates(linewidth=0.2)
+    _map.drawcoastlines(linewidth=1)
+    return _map
+
+def scatter_map(axis, mx, my, series, cb_min=None, cb_max=None, cmap='inferno_r',
+        size_func=None, show_cb=True, cb_fs=10):
+    series = np.array(series)
+    if cb_min is None:
+        cb_min = np.min(series)
+    if cb_max is None:
+        cb_max = np.max(series)
+    norm = mpl.colors.Normalize(vmin=cb_min, vmax=cb_max)
+    if size_func is None:
+        size_func = lambda series: 50
+    axis.scatter(mx, my, c=series, norm=norm, cmap=cmap, s=size_func(series))
+    if show_cb:
+        plt.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis)\
+            .ax.tick_params(labelsize=cb_fs)
 
 def average_degree(graph: nx.Graph):
     return 2 * len(graph.edges) / len(graph.nodes)
-
-def transitivity(graph: nx.Graph):
-    return nx.transitivity(graph)
-
-def eigenvector_centrality(graph):
-    try:
-        centrality = nx.eigenvector_centrality(graph)
-    except nx.exception.PowerIterationFailedConvergence:
-        return np.nan
-    return sum(centrality.values()) / len(graph.nodes)
-
-def betweenness_centrality(graph):
-    centrality = nx.betweenness_centrality(graph)
-    return sum(centrality.values()) / len(graph.nodes)
-
-def closeness_centrality(graph):
-    centrality = nx.closeness_centrality(graph)
-    return sum(centrality.values()) / len(graph.nodes)
-
-def coreness(graph: nx.Graph):
-    k_indices = nx.core_number(graph).values()
-    return sum(k_indices) / len(graph.nodes)
 
 # TODO: Make this faster
 def shortest_path_and_eccentricity(graph: nx.Graph):
@@ -58,23 +85,6 @@ def modularity(graph: nx.Graph, communities):
 # TODO: implement
 def global_average_link_distance(graph: nx.Graph):
     return None
-
-def get_map(axis=None):
-    _map = Basemap(
-        projection='merc',
-        llcrnrlon=110,
-        llcrnrlat=-45,
-        urcrnrlon=155,
-        urcrnrlat=-10,
-        lat_ts=0,
-        resolution='l',
-        suppress_ticks=True,
-        ax=axis,
-    )
-    _map.drawcountries(linewidth=1)
-    _map.drawstates(linewidth=0.2)
-    _map.drawcoastlines(linewidth=1)
-    return _map
 
 def prepare_indexed_df(raw_df, locations_df, month=None, new_index='date'):
     raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')

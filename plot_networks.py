@@ -60,40 +60,33 @@ def main():
     parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--start_year', type=int, default=2021)
     parser.add_argument('--start_month', type=int, default=4)
+    parser.add_argument('--month', type=int, default=None)
     parser.add_argument('--link_str_file_tag', default='alm_60_lag_0')
     args = parser.parse_args()
-
-    label_size = 20 if args.output_folder else 10
-    font_size = 20 if args.output_folder else 10
-    mpl.rcParams['xtick.labelsize'] = label_size
-    mpl.rcParams['ytick.labelsize'] = label_size
-    mpl.rcParams.update({'font.size': font_size})
-    def show_or_save(figure, filename):
-        if args.output_folder:
-            figure.set_size_inches(32, 18)
-            plt.savefig(f'{args.output_folder}/{filename}', bbox_inches='tight')
-            print(f'Plot saved to file {args.output_folder}/{filename}!')
-        else:
-            plt.show()
+    label_size, font_size, show_or_save = configure_plots(args)
 
     locations_df = pd.read_csv(LOCATIONS_FILE)
     lats = locations_df['Lat']
     lons = locations_df['Lon']
 
-    start_dt = datetime(args.start_year, args.start_month, 1)
-    end_dt = start_dt + relativedelta(months=11)
-    figure, axes = plt.subplots(3, 4, layout='compressed')
-    axes = iter(axes.flatten())
+    if args.month:
+        figure, axis = plt.subplots(1)
+    else:
+        figure, axes = plt.subplots(3, 4, layout='compressed')
+        axes = iter(axes.flatten())
+        start_dt = datetime(args.start_year, args.start_month, 1)
+        end_dt = start_dt + relativedelta(months=11)
+    # TODO: clean this up when doing month-by-month networks
     for y in YEARS:
-        for m in MONTHS:
-            dt = datetime(y, m, 1)
-            if dt < start_dt or dt > end_dt:
+        if args.month:
+            dt = datetime(y, args.month, 1)
+            date_summary = dt.year
+            links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_m{dt.strftime("%m_%Y")}.pkl'
+            try:
+                link_str_df: pd.DataFrame = pd.read_pickle(links_file)
+            except FileNotFoundError:
                 continue
-            date_summary = f'{dt.year}, {dt.strftime("%b")}'
-            links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_{dt.strftime("%Y_%m")}.pkl'
             print(f'{date_summary}: reading link strength data from pickle file {links_file}')
-            link_str_df: pd.DataFrame = pd.read_pickle(links_file)
-
             adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
             if args.edge_density:
                 threshold = np.quantile(link_str_df, 1 - args.edge_density)
@@ -104,16 +97,42 @@ def main():
             if not args.edge_density:
                 _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
                 print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
-           
-            axis = next(axes)
             _map = get_map(axis)
             map_x, map_y = _map(lons, lats)
             network_map(axis, map_x, map_y, adjacency, date_summary)
-    graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' if args.edge_density \
-        else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
-    figure_title = (f'networks_{args.link_str_file_tag}_{graph_file_tag}'
-        f'_{start_dt.strftime("%Y_%m")}_{end_dt.strftime("%Y_%m")}.png')
-    show_or_save(figure, figure_title)
+            graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' if args.edge_density \
+                else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
+            figure_title = (f'networks_{args.link_str_file_tag}_{graph_file_tag}'
+                f'_m{dt.strftime("%m_%Y")}.png')
+            show_or_save(figure, figure_title)
+        else:
+            for m in MONTHS:
+                dt = datetime(y, m, 1)
+                if dt < start_dt or dt > end_dt:
+                    continue
+                date_summary = f'{dt.year}, {dt.strftime("%b")}'
+                links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_{dt.strftime("%Y_%m")}.pkl'
+                print(f'{date_summary}: reading link strength data from pickle file {links_file}')
+                link_str_df: pd.DataFrame = pd.read_pickle(links_file)
+                adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
+                if args.edge_density:
+                    threshold = np.quantile(link_str_df, 1 - args.edge_density)
+                    print(f'{date_summary}: fixed edge density {args.edge_density} gives threshold {threshold}')
+                else:
+                    threshold = args.link_str_threshold
+                adjacency[link_str_df >= threshold] = 1
+                if not args.edge_density:
+                    _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
+                    print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
+                axis = next(axes)
+                _map = get_map(axis)
+                map_x, map_y = _map(lons, lats)
+                network_map(axis, map_x, map_y, adjacency, date_summary)
+            graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' if args.edge_density \
+                else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
+            figure_title = (f'networks_{args.link_str_file_tag}_{graph_file_tag}'
+                f'_{start_dt.strftime("%Y_%m")}_{end_dt.strftime("%Y_%m")}.png')
+            show_or_save(figure, figure_title)
 
 if __name__ == '__main__':
     main()
