@@ -8,7 +8,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import networkx as nx
 
-from calculate_link_strength import prepare_graph_plot
+from link_strength_corr import prepare_graph_plot
 
 DATA_DIR = 'data/precipitation'
 OUTPUTS_DIR = 'data/outputs'

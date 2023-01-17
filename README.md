@@ -1,7 +1,5 @@
 ## Guide for running code in this repository
 
-TODO: additional options and details
-
 ### Raw data analysis
 
 For plots and statistical analysis of raw precipitation data, see raw_plots.py in the `slid-research` repository.
@@ -38,15 +36,9 @@ Construct networks from precipitation data based on the following procedure:
   - If `lag_months` is specified, do this many times by lagging one series by 1 up to `lag_months` and correlating with the other (unlagged) series, then calculating the `(max - mean) / SD` of all resulting correlations.
   - If `no_anti_corr` is specified, reject any negative correlations. Otherwise, consider the absolute value of correlations.
 - Use `edge_density` or `link_str_threshold` to define an adjanency matrix based on the link strength matrix, then construct a `networkx` graph object based on this adjacency matrix.
-- Calculate the following metrics of this graph:
-  - Average degree
-  - Transitivity
-  - Eigenvector, betweenness and closeness centralities
-  - TODO: global average link distance, shortest path and eccentricity
-  - Louvain, greedy modularity and asyn_lpa partitions of the largest connected subgraph
 The precipitation dataframe and link strength matrices from the resulting graphs are saved to Pickle files.
 ```sh
-python calculate_link_strength.py
+python link_strength_corr.py
 ```
 
 Plot these networks for the last few years:
@@ -59,28 +51,30 @@ python plot_networks.py --output_folder outputs --start_year 2021
 
 Repeat but for networks constructed only with values from July:
 ```sh
-python calculate_link_strength.py --month 7
+python link_strength_corr.py --month 7
 python plot_networks.py --output_folder outputs --month 7
 ```
 
 Calculate the following metrics for graphs built from link strength matrices:
 - Average degree
 - Transitivity
+- Eccentricity
+- Average shortest path
 - Eigenvector, betweenness and closeness centralities
-- TODO: global average link distance, shortest path and eccentricity
 - Louvain, greedy modularity and asyn_lpa partitions of the largest connected subgraph
+- TODO: Global average link distance
 Save the metrics to Pickle files.
 ```sh
-python calculate_metrics.py --output_folder outputs
+python network_metrics.py --output_folder outputs
 ```
 
-Instead build link strength matrices using event synchronisation and event coincidence analysis: (TODO: ensure outputs can be read by plot_networks.py and calculate_metrics.py)
+Instead build link strength matrices using event synchronisation and event coincidence analysis:
 ```sh
-python event_sync.py --method sync
-python event_sync.py --method ca
+python link_strength_es.py --method sync
+python link_strength_es.py --method ca
 ```
 
-Plot location-dependent network metrics on a map: (TODO: combine with event_sync_metrics_map.py)
+Plot location-dependent network metrics on a map:
 ```sh
 python metrics_map.py --output_folder outputs/metric_maps
 ```
