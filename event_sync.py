@@ -8,7 +8,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import networkx as nx
 
-from build_networks import prepare_graph_plot
+from calculate_link_strength import prepare_graph_plot
 
 DATA_DIR = 'data/precipitation'
 OUTPUTS_DIR = 'data/outputs'
@@ -94,7 +94,7 @@ def main():
     adjacency = pd.DataFrame(0, columns=event_sync_df.columns,
         index=event_sync_df.columns)
     adjacency[sym_event_df > threshold] = 1
-    graph = nx.from_numpy_matrix(adjacency.values)
+    graph = nx.from_numpy_array(adjacency.values)
     graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
     locations_df = pd.read_csv(LOCATIONS_FILE)
     prepare_graph_plot(graph, adjacency, locations_df['Lon'], locations_df['Lat'],

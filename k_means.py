@@ -1,5 +1,5 @@
-from datetime import datetime
 import argparse
+from datetime import datetime
 
 import pandas as pd
 import numpy as np
@@ -9,38 +9,31 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from k_means_constrained import KMeansConstrained
 
-from helpers import get_map, prepare_indexed_df
+from helpers import configure_plots, get_map
 
+# Note that intra-annual analysis may be affected for 2000 and 2022, as these
+# years lack data for all months
 YEARS = list(range(2000, 2022 + 1))
 DATA_DIR = 'data/precipitation'
-DATA_FILE = f'{DATA_DIR}/FusedData.csv'
+PREC_DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
-# Ordered to give "rainbow" of increasing precipitation values in clusters
-COLOURS = {
+
+KMEANS_COLOURS = {
     2: ['#aaa', 'red'],
     3: ['#aaa', 'green', 'red'],
     4: ['#aaa', 'green', 'orange', 'red'],
     5: ['#aaa', '#666', 'green', 'orange', 'red'],
-    6: ['#aaa', '#666', 'cyan', 'green', 'orange', 'red'],
-    7: ['#aaa', '#666', 'blue', 'cyan', 'green', 'orange', 'red'],
+    6: ['#aaa', '#666', 'green', 'gold', 'orange', 'red'],
+    7: ['#aaa', '#666', 'cyan', 'green', 'gold', 'orange', 'red'],
     8: ['#aaa', '#666', 'blue', 'cyan', 'green', 'gold', 'orange', 'red'],
     9: ['#aaa', '#666', 'saddlebrown', 'blue', 'cyan', 'green', 'gold', 'orange', 'red'],
     10: ['#aaa', '#666', 'saddlebrown', 'blue', 'cyan', 'green', 'gold', 'orange', 'red', 'magenta'],
 }
+# Decade 1: April 2000 to March 2011
+# Decade 2: April 2011 to March 2022
+DECADE_INDICES = [range(0, 132), range(132, 264)]
 
-def kmeans_optimise(train_data: np.array, max_clusters, constrain):
-    sil_scores_dict = {}
-    kmeans_dict = {}
-    for n in range(2, max_clusters + 1):
-        if constrain:
-            kmeans_dict[n] = KMeansConstrained(n_clusters=n, random_state=0,
-                size_max=int(len(train_data) * constrain + 1)).fit(train_data)
-        else:
-            kmeans_dict[n] = KMeans(n_clusters=n, random_state=0).fit(train_data)
-        sil_scores_dict[n] = silhouette_score(train_data, kmeans_dict[n].labels_)
-    optimal_num_clusters = max(sil_scores_dict, key=sil_scores_dict.get)
-    return optimal_num_clusters, kmeans_dict[optimal_num_clusters], sil_scores_dict[optimal_num_clusters]
-
+# NOTE: currently not used
 def kmeans_optimise_gap(data, max_clusters, nrefs=5):
     gaps_dict = {}
     kmeans_dict = {}
@@ -52,11 +45,11 @@ def kmeans_optimise_gap(data, max_clusters, nrefs=5):
             # Create new random reference set
             random_reference = np.random.random_sample(size=data.shape)
             # Fit to it
-            km = KMeans(n_clusters=n)
+            km = KMeans(n_clusters=n, n_init='auto')
             km.fit(random_reference)
             ref_disps[i] = km.inertia_
         # Fit cluster to original data and create dispersion
-        kmeans_dict[n] = km = KMeans(n_clusters=n)
+        kmeans_dict[n] = km = KMeans(n_clusters=n, n_init='auto')
         km.fit(data)
         orig_disp = km.inertia_
         # Calculate gap statistic
@@ -67,156 +60,155 @@ def kmeans_optimise_gap(data, max_clusters, nrefs=5):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--month', type=int, default=None)
+    parser.add_argument('--output_folder', default=None)
     parser.add_argument('--fixed_clusters', type=int, default=None)
     parser.add_argument('--max_clusters', type=int, default=10)
     # Fraction of total number of points as upper bound on cluster size
     parser.add_argument('--constrain', type=float, default=None)
+    # TODO: implement using helper above
     parser.add_argument('--gap', action='store_true', default=False)
-    parser.add_argument('--plot_clusters', action='store_true', default=False)
-    parser.add_argument('--save_summary', action='store_true', default=False)
-    parser.add_argument('--merged_summary', action='store_true', default=False)
+    parser.add_argument('--decadal', action='store_true', default=False)
+    parser.add_argument('--monthly', action='store_true', default=False)
     args = parser.parse_args()
+    label_size, font_size, show_or_save = configure_plots(args)
 
-    raw_df = pd.read_csv(DATA_FILE)
+    # Data variables to be used throughout script
+    raw_prec_df = pd.read_csv(PREC_DATA_FILE)
+    raw_prec_df.columns = pd.to_datetime(raw_prec_df.columns, format='D%Y.%m')
     locations_df = pd.read_csv(LOCATIONS_FILE)
-    df = prepare_indexed_df(raw_df, locations_df, month=args.month, new_index='date')
-
-    months = [args.month] if args.month else list(range(1, 13))
-    lons = locations_df['Lon']
+    prec_df = pd.concat([locations_df, raw_prec_df], axis=1)
+    prec_df = prec_df.set_index(['Lat', 'Lon']).T
     lats = locations_df['Lat']
-    summary_df = []
-    for y in YEARS:
-        for m in months:
-            dt = datetime(y, m, 1)
-            try:
-                location_df = df.loc[dt]
-            except KeyError:
-                continue
-            train_data = np.array(location_df['prec']).reshape(-1, 1)
-            if args.fixed_clusters:
-                num_clusters = args.fixed_clusters
-                kmeans = KMeans(n_clusters=num_clusters, random_state=0).fit(train_data)
-                sil_score = silhouette_score(train_data, kmeans.labels_)
-                print(f'{dt.strftime("%b")} {y}: silhouette score {sil_score} for {num_clusters} clusters')
-            else:
-                if args.gap:
-                    num_clusters, kmeans, gap = kmeans_optimise_gap(train_data,
-                        args.max_clusters)
-                    sil_score = silhouette_score(train_data, kmeans.labels_)
-                    print(f'{dt.strftime("%b")} {y}: {num_clusters} optimal clusters with silhouette score {sil_score}'
-                        f' and gap statistic {gap}')
-                else:
-                    num_clusters, kmeans, sil_score = kmeans_optimise(train_data,
-                        args.max_clusters, args.constrain)
-                    print(f'{dt.strftime("%b")} {y}: {num_clusters} optimal clusters with silhouette score {sil_score}')
-            summary_df.append({
-                'dt': dt,
-                'num_clusters': num_clusters,
-                'sil_score': sil_score,
-            })
-            if args.plot_clusters:
-                # Order the colours based on average precipitation in clusters
-                cluster_means, cluster_st_devs, cluster_sizes = [], [], []
-                for n in set(kmeans.labels_):
-                    cluster_indices = [i for i, label in enumerate(kmeans.labels_) if label == n]
-                    cluster_slice = location_df.iloc[cluster_indices]['prec']
-                    cluster_means.append(cluster_slice.mean())
-                    cluster_st_devs.append(cluster_slice.std())
-                    cluster_sizes.append(len(cluster_slice))
-                permuted_colours = [0] * len(cluster_means)
-                for i_old, i_new in enumerate(np.argsort(cluster_means)):
-                    permuted_colours[i_new] = COLOURS[len(cluster_means)][i_old]
-                    print(f'cluster ({i_old}, {permuted_colours[i_new]}):',
-                        f'size = {round(cluster_sizes[i_new], 3)},',
-                        f'mean = {round(cluster_means[i_new], 3)},',
-                        f'st dev = {round(cluster_st_devs[i_new], 3)}',
-                    )
-                node_colours = [permuted_colours[cluster] for cluster in kmeans.labels_]
-                figure, axis = plt.subplots(1)
-                mx, my = get_map(axis)(lons, lats)
-                cmap = mpl.colors.ListedColormap([permuted_colours[i] for i in range(num_clusters)])
-                title = f'{dt.strftime("%b")} {y}: k-means ({num_clusters} clusters, silhouette score {round(sil_score, 3)})'
-                axis.set_title(title)
-                axis.scatter(mx, my, c=node_colours, cmap=cmap)
-                plt.show()
+    lons = locations_df['Lon']
 
-    summary_df = pd.DataFrame.from_dict(summary_df).set_index(['dt'])
-    if args.month:
-        plot_title = dt.strftime("%B")
-        filename_title = f'm{args.month}' if args.month >= 10 else f'm0{args.month}'
-    elif args.merged_summary:
-        filename_title = 'merged'
-    else:
-        plot_title = 'whole_series'
-        filename_title = 'whole_series'
-    top_month_dfs = []
-    bottom_month_dfs = []
-    top_month_labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']
-    bottom_month_labels = ['Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    jan_dts = [datetime(y, 1, 1) for y in YEARS]
-    for m in range(1, 7):
-        month_df = summary_df.loc[summary_df.index.month == m]
-        top_month_dfs.append(month_df)
-    for m in range(7, 13):
-        month_df = summary_df.loc[summary_df.index.month == m]
-        bottom_month_dfs.append(month_df)
-    if args.fixed_clusters:
-        if args.merged_summary:
-            figure, axes = plt.subplots(2, 1)
-            axes = axes.flatten()
-            axes[0].set_title(f'Jan to Jun: silhouette score ({args.fixed_clusters} clusters)')
-            axes[1].set_title(f'Jul to Dec: silhouette score ({args.fixed_clusters} clusters)')
-            for _df in top_month_dfs:
-                axes[0].plot(jan_dts[0 : len(_df)], _df['sil_score'])
-            for _df in bottom_month_dfs:
-                axes[1].plot(jan_dts[0 : len(_df)], _df['sil_score'])
-            axes[0].legend(labels=top_month_labels)
-            axes[1].legend(labels=bottom_month_labels)
+    def plot_clusters(series, kmeans_labels, axis, n_clusters):
+        # Order the colours based on average values in clusters
+        cluster_means = []
+        for k in set(kmeans_labels):
+            cluster_indices = [i for i, label in enumerate(kmeans_labels) if label == k]
+            cluster_slice = series[cluster_indices]
+            cluster_means.append(cluster_slice.mean())
+        permuted_colours = [0] * len(cluster_means)
+        for i_old, i_new in enumerate(np.argsort(cluster_means)):
+            permuted_colours[i_new] = KMEANS_COLOURS[len(cluster_means)][i_old]
+        node_colours = [permuted_colours[cluster] for cluster in kmeans_labels]
+        _map = get_map(axis)
+        mx, my = _map(lons, lats)
+        axis.scatter(mx, my, c=node_colours, s=100 if args.output_folder else 20)
+
+    def kmeans_fit(k, array):
+        if args.constrain:
+            kmeans = KMeansConstrained(n_clusters=k, random_state=0,
+                size_max=int(len(array) * args.constrain + 1)).fit(array)
         else:
-            figure, axis = plt.subplots(1, 1)
-            axis.set_title(f'{plot_title}: silhouette score ({args.fixed_clusters} clusters)')
-            axis.plot(summary_df.index, summary_df['sil_score'])
-        if args.save_summary:
-            figure.set_size_inches(32, 18)
-            filename = f'images/clusters{"_constrained" if args.constrain else ""}_fixed_{args.fixed_clusters}_{filename_title}.png'
-            print(f'Saving summary to file {filename}')
-            plt.savefig(filename)
+            kmeans = KMeans(n_clusters=k, random_state=0, n_init='auto').fit(array)
+        sil_score = silhouette_score(array, kmeans.labels_)
+        return kmeans.labels_, sil_score
+
+    # First, calculate and print silhouette scores for k = 2, ..., 12
+    k_list = list(range(2, 12 + 1))
+    if args.decadal:
+        sils_df = pd.DataFrame(0, index=k_list, columns=['d1', 'd2'])
+        prec_d1 = np.array(prec_df.iloc[DECADE_INDICES[0], :]).T
+        prec_d2 = np.array(prec_df.iloc[DECADE_INDICES[1], :]).T
+        for j, k in enumerate(k_list):
+            try:
+                _, sils_df.iloc[j, 0] = kmeans_fit(k, prec_d1)
+                _, sils_df.iloc[j, 1] = kmeans_fit(k, prec_d2)
+            except ValueError:
+                continue
+    elif args.monthly:
+        sils_df = pd.DataFrame(0, index=k_list, columns=[
+            *[f'd1_m{m}' for m in range(1, 12 + 1)],
+            *[f'd2_m{m}' for m in range(1, 12 + 1)],
+        ])
+        prec_d1 = prec_df.iloc[DECADE_INDICES[0], :]
+        prec_d2 = prec_df.iloc[DECADE_INDICES[1], :]
+        for i, m in enumerate(range(1, 12 + 1)):
+            prec_d1_m = np.array(prec_d1.loc[[dt.month == m for dt in prec_d1.index], :]).T
+            prec_d2_m = np.array(prec_d1.loc[[dt.month == m for dt in prec_d2.index], :]).T
+            try:
+                for j, k in enumerate(k_list):
+                    _, sils_df.iloc[j, i] = kmeans_fit(k, prec_d1)
+                    _, sils_df.iloc[j, 12 + i] = kmeans_fit(k, prec_d2)
+            except ValueError:
+                continue
     else:
-        if args.merged_summary:
-            figure, axes = plt.subplots(2, 2)
-            axes = axes.flatten()
-            axes[0].set_title(f'Jan to Jun: optimal number of clusters')
-            axes[1].set_title(f'Jan to Jun: silhouette score')
-            axes[2].set_title(f'Jul to Dec: optimal number of clusters')
-            axes[3].set_title(f'Jul to Dec: silhouette score')
-            for _df in top_month_dfs:
-                axes[0].plot(jan_dts[0 : len(_df)], _df['num_clusters'])
-                axes[1].plot(jan_dts[0 : len(_df)], _df['sil_score'])
-            for _df in bottom_month_dfs:
-                axes[2].plot(jan_dts[0 : len(_df)], _df['num_clusters'])
-                axes[3].plot(jan_dts[0 : len(_df)], _df['sil_score'])
-            axes[0].legend(labels=top_month_labels)
-            axes[1].legend(labels=top_month_labels)
-            axes[2].legend(labels=bottom_month_labels)
-            axes[3].legend(labels=bottom_month_labels)
-        else:
-            figure, axes = plt.subplots(2, 1)
-            axes = axes.flatten()
-            axes[0].set_title(f'{plot_title}: optimal number of clusters')
-            axes[0].plot(summary_df.index, summary_df['num_clusters'])
-            axes[1].set_title(f'{plot_title}: silhouette score')
-            axes[1].plot(summary_df.index, summary_df['sil_score'])
-        if args.save_summary:
-            figure.set_size_inches(32, 18)
-            filename = f'images/clusters{"_constrained" if args.constrain else ""}_optimal{"_gap" if args.gap else ""}_{filename_title}.png'
-            print(f'Saving summary to file {filename}')
-            plt.savefig(filename)
-    print(f'Average silhouette score: {summary_df["sil_score"].mean()}')
-    if not args.save_summary:
-        plt.show()
+        sils_df = pd.Series(0, index=k_list)
+        for j, k in enumerate(k_list):
+            try:
+                sils = []
+                for i, dt in enumerate(prec_df.index.values):
+                    if i % 50 == 0:
+                        print(f'{j} / {len(k_list)}, {i} / {len(prec_df.index.values)}')
+                    slid_dt = np.array(prec_df.iloc[i, :]).reshape(-1, 1)
+                    _, sil = kmeans_fit(k, slid_dt)
+                    sils.append(sil)
+                sils_df.iloc[j] = np.mean(sils)
+            except ValueError:
+                continue
+    sils_df.index.name = 'num_clusters'
+    print(sils_df)
+
+    # Next, plot results for k = 4, ..., 9
+    fig_name_base = 'prec_kmeans'
+    if args.constrain:
+        fig_name_base += f'_c{round(100 * args.constrain)}'
+    k_list = list(range(4, 9 + 1))
+    if args.decadal:
+        prec_d1 = np.array(prec_df.iloc[DECADE_INDICES[0], :]).T
+        prec_d2 = np.array(prec_df.iloc[DECADE_INDICES[1], :]).T
+        figure, axes = plt.subplots(2, 3, layout='compressed')
+        axes = iter(axes.flatten())
+        for k in k_list:
+            labels_d1, sil_d1 = kmeans_fit(k, prec_d1)
+            axis = next(axes)
+            plot_clusters(prec_d1, labels_d1, axis, k)
+            axis.set_title(f'Decade 1, {k} clusters, sil score {round(sil_d1, 4)}')
+        show_or_save(figure, f'{fig_name_base}_decade_1.png')
+        figure, axes = plt.subplots(2, 3, layout='compressed')
+        axes = iter(axes.flatten())
+        for k in k_list:
+            labels_d2, sil_d2 = kmeans_fit(k, prec_d2)
+            axis = next(axes)
+            plot_clusters(prec_d2, labels_d2, axis, k)
+            axis.set_title(f'Decade 2, {k} clusters, sil score {round(sil_d2, 4)}')
+        show_or_save(figure, f'{fig_name_base}_decade_2.png')
+    elif args.monthly:
+        prec_d1 = prec_df.iloc[DECADE_INDICES[0], :]
+        prec_d2 = prec_df.iloc[DECADE_INDICES[1], :]
+        for m in range(1, 12 + 1):
+            _dt = datetime(2000, m, 1)
+            prec_d1_m = np.array(prec_d1.loc[[dt.month == m for dt in prec_d1.index], :]).T
+            figure, axes = plt.subplots(2, 3, layout='compressed')
+            axes = iter(axes.flatten())
+            for k in k_list:
+                labels_d1, sil_d1 = kmeans_fit(k, prec_d1_m)
+                axis = next(axes)
+                plot_clusters(prec_d1_m, labels_d1, axis, k)
+                axis.set_title(f'Decade 1 {_dt.strftime("%b")}, {k} clusters, sil score {round(sil_d1, 4)}')
+            show_or_save(figure, f'{fig_name_base}_m{_dt.strftime("%m")}_decade_1.png')
+            prec_d2_m = np.array(prec_d2.loc[[dt.month == m for dt in prec_d2.index], :]).T
+            figure, axes = plt.subplots(2, 3, layout='compressed')
+            axes = iter(axes.flatten())
+            for k in k_list:
+                labels_d2, sil_d2 = kmeans_fit(k, prec_d2_m)
+                axis = next(axes)
+                plot_clusters(prec_d2_m, labels_d2, axis, k)
+                axis.set_title(f'Decade 2 {_dt.strftime("%b")}, {k} clusters, sil score {round(sil_d2, 4)}')
+            show_or_save(figure, f'{fig_name_base}_m{_dt.strftime("%m")}_decade_2.png')
+    else:
+        for i, dt in enumerate(prec_df.index.values):
+            _dt = pd.to_datetime(dt)
+            prec_dt = np.array(prec_df.iloc[i, :]).reshape(-1, 1)
+            figure, axes = plt.subplots(2, 3, layout='compressed')
+            axes = iter(axes.flatten())
+            for k in k_list:
+                labels, sil = kmeans_fit(k, prec_dt)
+                axis = next(axes)
+                plot_clusters(prec_dt, labels, axis, k)
+                axis.set_title(f'{_dt.strftime("%b %Y")} {k} clusters, sil score {round(sil, 4)}')
+            show_or_save(figure, f'{fig_name_base}_{_dt.strftime("%Y_%m")}.png')
 
 if __name__ == '__main__':
-    start = datetime.now()
     main()
-    print(f'Total time elapsed: {datetime.now() - start}')

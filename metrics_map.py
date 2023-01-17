@@ -1,10 +1,7 @@
 import argparse
-from datetime import datetime
 
-import networkx as nx
 import pandas as pd
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 from helpers import configure_plots, get_map, scatter_map
 
