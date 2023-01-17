@@ -41,10 +41,6 @@ def main():
     df_mins = [df.min().min() for df in dfs]
     df_maxes = [df.max().max() for df in dfs]
     for dt in coreness_df.index.values:
-        #############################################
-        # if pd.to_datetime(dt).year < 2021:
-        #     continue
-        #############################################
         if coreness_df.loc[dt].isnull().all():
             continue
         figure, axes = plt.subplots(2, 3, layout='compressed')
