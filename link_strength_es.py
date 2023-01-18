@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 import argparse
-from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -8,10 +7,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import networkx as nx
 
-from link_strength_corr import prepare_graph_plot
-
 DATA_DIR = 'data/precipitation'
-OUTPUTS_DIR = 'data/outputs'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 
@@ -32,83 +28,58 @@ def main():
 
     dot_to_p = lambda num: str(num).replace('.', 'p')
     month_str = str(args.end_month) if args.end_month >= 10 else f'0{args.end_month}'
-    base_filename = (f'event_{args.method}_colq_{dot_to_p(args.col_quantile)}_dfq_{dot_to_p(args.df_quantile)}'
-        f'_tau_{args.tau}_{args.end_year}_{month_str}_lm_{str(args.lookback_months)}')
-    event_data_file = f'{OUTPUTS_DIR}/{base_filename}.csv'
-    if Path(event_data_file).is_file():
-        print(f'Reading event data from file {event_data_file}')
-        event_sync_df = pd.read_csv(event_data_file, index_col=[0, 1], header=[0, 1])
-    else:
-        df = pd.read_csv(DATA_FILE)
-        df.columns = pd.to_datetime(df.columns, format='D%Y.%m')
-        locations_df = pd.read_csv(LOCATIONS_FILE)
-        df = pd.concat([locations_df, df], axis=1)
-        df = df.set_index(['Lat', 'Lon'])
-        df = df.T
-        if args.lookback_months:
-            end_months = args.end_year * 12 + args.end_month
-            df = df.loc[datetime((end_months - args.lookback_months) // 12,
-                    (end_months  - args.lookback_months) % 12 + 1, 1)
-                : datetime(args.end_year, args.end_month, 1)]
+    base_filename = (f'link_str_event_{args.method}_colq_{dot_to_p(args.col_quantile)}_dfq_{dot_to_p(args.df_quantile)}'
+        f'_tau_{args.tau}_lm_{str(args.lookback_months)}_{args.end_year}_{month_str}')
+    prec_df = pd.read_csv(DATA_FILE)
+    prec_df.columns = pd.to_datetime(prec_df.columns, format='D%Y.%m')
+    locations_df = pd.read_csv(LOCATIONS_FILE)
+    prec_df = pd.concat([locations_df, prec_df], axis=1)
+    prec_df = prec_df.set_index(['Lat', 'Lon'])
+    prec_df = prec_df.T
+    if args.lookback_months:
+        end_months = args.end_year * 12 + args.end_month
+        prec_df = prec_df.loc[datetime((end_months - args.lookback_months) // 12,
+                (end_months  - args.lookback_months) % 12 + 1, 1)
+            : datetime(args.end_year, args.end_month, 1)]
 
-        event_df = pd.DataFrame(0, columns=df.columns, index=df.index)
-        event_df[df > np.quantile(df, args.df_quantile)] = 1
-        print(f'Number of extreme events over whole dataframe: {event_df.to_numpy().sum()}')
-        if args.col_quantile:
-            extreme_column_events_df = pd.DataFrame(0, columns=df.columns, index=df.index)
-            for c in df.columns:
-                extreme_column_events_df[c][df[c] > np.quantile(df[c], args.col_quantile)] = 1
-            print(f'Number of extreme events over columns: {extreme_column_events_df.to_numpy().sum()}')
-            event_df &= extreme_column_events_df
-            print(f'Number of merged extreme events: {event_df.to_numpy().sum()}')
-        event_array = np.array(event_df)
+    event_df = pd.DataFrame(0, columns=prec_df.columns, index=prec_df.index)
+    event_df[prec_df > np.quantile(prec_df, args.df_quantile)] = 1
+    print(f'Number of extreme events over whole dataframe: {event_df.to_numpy().sum()}')
+    if args.col_quantile:
+        extreme_column_events_df = pd.DataFrame(0, columns=prec_df.columns, index=prec_df.index)
+        for c in prec_df.columns:
+            extreme_column_events_df[c][prec_df[c] > np.quantile(prec_df[c], args.col_quantile)] = 1
+        print(f'Number of extreme events over columns: {extreme_column_events_df.to_numpy().sum()}')
+        event_df &= extreme_column_events_df
+        print(f'Number of merged extreme events: {event_df.to_numpy().sum()}')
+    event_array = np.array(event_df)
 
-        n = event_array.shape[1]
-        event_sync_array = np.zeros((n, n))
-        for i in range(0, n):
-            if i % 100 == 0:
-                print(f'{i} / {n}')
-            for j in range(i + 1, n):
-                if args.method == 'sync':
-                    event_sync_array[i, j], event_sync_array[j, i] = event_sync(
-                        event_array[:, i], event_array[:, j], taumax=args.tau)
-                elif args.method == 'ca':
-                    # Use trigger rather than precursor
-                    _, event_sync_array[i, j], _, event_sync_array[j, i] = event_ca(
-                        event_array[:, i], event_array[:, j], delT=args.tau)
-                else:
-                    raise ValueError(f'Invalid event method: {args.method}')
+    n = event_array.shape[1]
+    event_sync_array = np.zeros((n, n))
+    for i in range(0, n):
+        if i % 100 == 0:
+            print(f'{i} / {n}')
+        for j in range(i + 1, n):
+            if args.method == 'sync':
+                event_sync_array[i, j], event_sync_array[j, i] = event_sync(
+                    event_array[:, i], event_array[:, j], taumax=args.tau)
+            elif args.method == 'ca':
+                # Use trigger rather than precursor
+                _, event_sync_array[i, j], _, event_sync_array[j, i] = event_ca(
+                    event_array[:, i], event_array[:, j], delT=args.tau)
+            else:
+                raise ValueError(f'Invalid event method: {args.method}')
 
-        event_sync_df = pd.DataFrame(event_sync_array, columns=event_df.columns,
-            index=event_df.columns)
-        event_data_file = f'{OUTPUTS_DIR}/{base_filename}.csv'
-        print(f'Saving event data to file {event_data_file}')
-        event_sync_df.to_csv(event_data_file)
+    event_sync_df = pd.DataFrame(event_sync_array, columns=event_df.columns,
+        index=event_df.columns)
 
     # Symmetric ES/ECA matrix
     sym_event_array = np.array(event_sync_df) + np.array(event_sync_df).T
     sym_event_df = pd.DataFrame(sym_event_array, columns=event_sync_df.columns,
         index=event_sync_df.columns).fillna(0)
-    threshold = np.quantile(sym_event_df, 1 - args.edge_density)
-    print(f'Fixed edge density {args.edge_density} gives threshold {threshold}')
-    adjacency = pd.DataFrame(0, columns=event_sync_df.columns,
-        index=event_sync_df.columns)
-    adjacency[sym_event_df > threshold] = 1
-    graph = nx.from_numpy_array(adjacency.values)
-    graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
-    locations_df = pd.read_csv(LOCATIONS_FILE)
-    prepare_graph_plot(graph, adjacency, locations_df['Lon'], locations_df['Lat'],
-        plot=not args.save_graph_folder)
-    if args.save_graph_folder:
-        plt.gcf().set_size_inches(32, 18)
-        base_filename = (f'event_{args.method}_colq_{dot_to_p(args.col_quantile)}_dfq_{dot_to_p(args.df_quantile)}'
-            f'_tau_{args.tau}_{args.end_year}_{month_str}_lm_{str(args.lookback_months)}')
-        title = (f'Event {args.method}: {datetime(args.end_year, args.end_month, 1).strftime("%B")}'
-            f' {args.end_year}, ({args.lookback_months} lookback months)')
-        plt.title(title)
-        filename = f'{args.save_graph_folder}/{base_filename}_ed_{dot_to_p(args.edge_density)}.png'
-        print(f'Saving graph plot to file {filename}')
-        plt.savefig(filename)
+    event_data_file = f'{DATA_DIR}/{base_filename}.csv'
+    print(f'Saving event data to CSV file {event_data_file}')
+    sym_event_df.to_csv(event_data_file)
 
 def event_sync(seq_1, seq_2, taumax):
     '''Calculates the directed event synchronization from two event

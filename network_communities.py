@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from networkx.algorithms import community
-from helpers import get_map
+from helpers import read_link_str_df, get_map
 
 DATA_DIR = 'data/precipitation'
 
@@ -21,10 +21,7 @@ def main():
     args = parser.parse_args()
 
     prec_seq_df = pd.read_pickle(f'{DATA_DIR}/{args.prec_seq_file}')
-    link_str_df = pd.read_csv(f'{DATA_DIR}/{args.link_str_file}',
-        index_col=[0, 1], header=[0, 1])
-    link_str_df.columns = [link_str_df.columns.get_level_values(i).astype(float) \
-        for i in range(len(link_str_df.columns.levels))]
+    link_str_df = read_link_str_df(f'{DATA_DIR}/{args.link_str_file}')
     try:
         date_part = args.link_str_file.split('lag_')[1].split('.csv')[0]
         _, year, month = date_part.split('_')

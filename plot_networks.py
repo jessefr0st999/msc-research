@@ -61,7 +61,7 @@ def main():
     parser.add_argument('--start_year', type=int, default=2021)
     parser.add_argument('--start_month', type=int, default=4)
     parser.add_argument('--month', type=int, default=None)
-    parser.add_argument('--link_str_file_tag', default='alm_60_lag_0')
+    parser.add_argument('--link_str_file_tag', default='corr_alm_60_lag_0')
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
@@ -81,12 +81,12 @@ def main():
         if args.month:
             dt = datetime(y, args.month, 1)
             date_summary = dt.year
-            links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_m{dt.strftime("%m_%Y")}.pkl'
+            links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_m{dt.strftime("%m_%Y")}.csv'
             try:
-                link_str_df: pd.DataFrame = pd.read_pickle(links_file)
+                link_str_df = read_link_str_df(links_file)
             except FileNotFoundError:
                 continue
-            print(f'{date_summary}: reading link strength data from pickle file {links_file}')
+            print(f'{date_summary}: reading link strength data from CSV file {links_file}')
             adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
             if args.edge_density:
                 threshold = np.quantile(link_str_df, 1 - args.edge_density)
@@ -104,16 +104,18 @@ def main():
                 else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
             figure_title = (f'networks_{args.link_str_file_tag}_{graph_file_tag}'
                 f'_m{dt.strftime("%m_%Y")}.png')
-            show_or_save(figure, figure_title)
         else:
             for m in MONTHS:
                 dt = datetime(y, m, 1)
                 if dt < start_dt or dt > end_dt:
                     continue
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
-                links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_{dt.strftime("%Y_%m")}.pkl'
-                print(f'{date_summary}: reading link strength data from pickle file {links_file}')
-                link_str_df: pd.DataFrame = pd.read_pickle(links_file)
+                links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_{dt.strftime("%Y_%m")}.csv'
+                try:
+                    link_str_df = read_link_str_df(links_file)
+                except FileNotFoundError:
+                    continue
+                print(f'{date_summary}: reading link strength data from CSV file {links_file}')
                 adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
                 if args.edge_density:
                     threshold = np.quantile(link_str_df, 1 - args.edge_density)
@@ -132,7 +134,7 @@ def main():
                 else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
             figure_title = (f'networks_{args.link_str_file_tag}_{graph_file_tag}'
                 f'_{start_dt.strftime("%Y_%m")}_{end_dt.strftime("%Y_%m")}.png')
-            show_or_save(figure, figure_title)
+    show_or_save(figure, figure_title)
 
 if __name__ == '__main__':
     main()

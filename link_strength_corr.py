@@ -177,7 +177,7 @@ def main():
                 continue
             analysed_dt_count += 1
             date_summary = f'{dt.year}, {dt.strftime("%b")}'
-            links_file = (f'{DATA_DIR}/link_str{base_file_name}_{dt.year}')
+            links_file = (f'{DATA_DIR}/link_str_corr{base_file_name}_{dt.year}')
             if not args.month:
                 month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
                 links_file += f'_{month_str}'

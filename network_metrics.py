@@ -42,7 +42,7 @@ def main():
     parser.add_argument('--output_folder', default='outputs')
     parser.add_argument('--edge_density', type=float, default=0.005)
     parser.add_argument('--link_str_threshold', type=float, default=None)
-    parser.add_argument('--link_str_file_tag', default='alm_60_lag_0')
+    parser.add_argument('--link_str_file_tag', default='corr_alm_60_lag_0')
     args = parser.parse_args()
 
     prec_df = pd.read_csv(DATA_FILE)
@@ -64,9 +64,7 @@ def main():
             dt = datetime(y, m, 1)
             links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_{dt.strftime("%Y_%m")}.csv'
             try:
-                link_str_df = pd.read_csv(links_file, index_col=[0, 1], header=[0, 1])
-                link_str_df.columns = [link_str_df.columns.get_level_values(i).astype(float) \
-                    for i in range(len(link_str_df.columns.levels))]
+                link_str_df = read_link_str_df(links_file)
             except FileNotFoundError:
                 continue
             date_summary = f'{dt.year}, {dt.strftime("%b")}'

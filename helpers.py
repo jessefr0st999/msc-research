@@ -5,6 +5,12 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from networkx.algorithms import community
 from mpl_toolkits.basemap import Basemap
+
+def read_link_str_df(filename):
+    link_str_df = pd.read_csv(filename, index_col=[0, 1], header=[0, 1])
+    link_str_df.columns = [link_str_df.columns.get_level_values(i).astype(float) \
+        for i in range(len(link_str_df.columns.levels))]
+    return link_str_df
             
 def configure_plots(args):
     label_size = 20 if args.output_folder else 10
