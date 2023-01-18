@@ -13,25 +13,27 @@ DATA_DIR = 'data/precipitation'
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--prec_file', default='dataframe_alm_60_lag_0.pkl')
-    parser.add_argument('--link_str_file', default='link_str_alm_60_lag_0_2022_03.pkl')
+    parser.add_argument('--prec_seq_file', default='dataframe_alm_60_lag_0.pkl')
+    parser.add_argument('--link_str_file', default='link_str_alm_60_lag_0_2022_03.csv')
     parser.add_argument('--output_folder', default=None)
     parser.add_argument('--edge_density', type=float, default=0.005)
     parser.add_argument('--num_af_communities', type=int, default=6)
     args = parser.parse_args()
 
-    prec_df = pd.read_pickle(f'{DATA_DIR}/{args.prec_file}')
-    link_str_df = pd.read_pickle(f'{DATA_DIR}/{args.link_str_file}')
+    prec_seq_df = pd.read_pickle(f'{DATA_DIR}/{args.prec_seq_file}')
+    link_str_df = pd.read_csv(f'{DATA_DIR}/{args.link_str_file}',
+        index_col=[0, 1], header=[0, 1])
+    link_str_df.columns = [link_str_df.columns.get_level_values(i).astype(float) \
+        for i in range(len(link_str_df.columns.levels))]
     try:
-        date_part = args.link_str_file.split('lag_')[1].split('.pkl')[0]
+        date_part = args.link_str_file.split('lag_')[1].split('.csv')[0]
         _, year, month = date_part.split('_')
     except IndexError:
         # Month-only link strength files
         year = int(args.link_str_file.split('_')[-1][:4])
         month = int(args.link_str_file.split('_')[-2][-2:])
     dt = datetime(int(year), int(month), 1)
-    dt_prec_df = prec_df.loc[dt]
-    location_prec_df = dt_prec_df.set_index(['lat', 'lon'])
+    dt_prec_seq_df = prec_seq_df.loc[dt]
     threshold = np.quantile(link_str_df, 1 - args.edge_density)
     print(f'Fixed edge density {args.edge_density} gives threshold {threshold}')
     adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
@@ -81,7 +83,7 @@ def main():
     gm_map = get_map(axes[1])
     af_map = get_map(axes[2])
     al_map = get_map(axes[3])
-    mx, my = lv_map(dt_prec_df['lon'], dt_prec_df['lat'])
+    mx, my = lv_map(dt_prec_seq_df['lon'], dt_prec_seq_df['lat'])
     pos = {}
     for i, elem in enumerate(adjacency.index):
         pos[elem] = (mx[i], my[i])

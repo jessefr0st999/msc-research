@@ -36,7 +36,7 @@ Construct networks from precipitation data based on the following procedure:
   - If `lag_months` is specified, do this many times by lagging one series by 1 up to `lag_months` and correlating with the other (unlagged) series, then calculating the `(max - mean) / SD` of all resulting correlations.
   - If `no_anti_corr` is specified, reject any negative correlations. Otherwise, consider the absolute value of correlations.
 - Use `edge_density` or `link_str_threshold` to define an adjanency matrix based on the link strength matrix, then construct a `networkx` graph object based on this adjacency matrix.
-The precipitation dataframe and link strength matrices from the resulting graphs are saved to Pickle files.
+The precipitation dataframe and link strength matrices from the resulting graphs are saved to CSV files.
 ```sh
 python link_strength_corr.py
 ```

@@ -7,8 +7,6 @@ import pandas as pd
 import numpy as np
 # from geopy.distance import geodesic
 
-from helpers import *
-
 YEARS = list(range(2000, 2022 + 1))
 LINK_STR_METHOD = None
 # LINK_STR_METHOD = 'max'
@@ -44,7 +42,7 @@ def main():
     else:
         base_file_name += f'_lag_{args.lag_months}'
 
-    PREC_DATA_FILE = f'{DATA_DIR}/dataframe{base_file_name}.pkl'
+    PREC_SEQ_FILE = f'{DATA_DIR}/dataframe{base_file_name}.pkl'
     months = [args.month] if args.month else list(range(1, 13))
 
     ## Helper functions
@@ -156,13 +154,13 @@ def main():
         df = df.set_index('date')
         return df
 
-    if Path(PREC_DATA_FILE).is_file():
-        print(f'Reading precipitation sequences from pickle file {PREC_DATA_FILE}')
-        prec_df: pd.DataFrame = pd.read_pickle(PREC_DATA_FILE)
+    if Path(PREC_SEQ_FILE).is_file():
+        print(f'Reading precipitation sequences from pickle file {PREC_SEQ_FILE}')
+        prec_df: pd.DataFrame = pd.read_pickle(PREC_SEQ_FILE)
     else:
-        print(f'Calculating precipitation sequences and saving to pickle file {PREC_DATA_FILE}')
+        print(f'Calculating precipitation sequences and saving to pickle file {PREC_SEQ_FILE}')
         prec_df = prepare_prec_df(pd.read_csv(DATA_FILE))
-        prec_df.to_pickle(PREC_DATA_FILE)
+        prec_df.to_pickle(PREC_SEQ_FILE)
 
     analysed_dt_count = 0
     for y in YEARS:
@@ -185,13 +183,13 @@ def main():
                 links_file += f'_{month_str}'
             if args.link_str_geo_penalty:
                 links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
-            links_file += '.pkl'
             print(f'\n{date_summary}: calculating link strength data...')
             start = datetime.now()
             link_str_df = build_link_str_df(prec_dt)
-            print((f'{date_summary}: link strengths calculated and saved'
-                f' to pickle file {links_file}; time elapsed: {datetime.now() - start}'))
-            link_str_df.to_pickle(links_file)
+            links_file += '.csv'
+            print((f'{date_summary}: link strengths calculated and saved to CSV file'
+                f' {links_file}; time elapsed: {datetime.now() - start}'))
+            link_str_df.to_csv(links_file)
 
 if __name__ == '__main__':
     start = datetime.now()

@@ -62,13 +62,15 @@ def main():
     for y in YEARS:
         for m in MONTHS:
             dt = datetime(y, m, 1)
-            links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_{dt.strftime("%Y_%m")}.pkl'
+            links_file = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_{dt.strftime("%Y_%m")}.csv'
             try:
-                link_str_df: pd.DataFrame = pd.read_pickle(links_file)
+                link_str_df = pd.read_csv(links_file, index_col=[0, 1], header=[0, 1])
+                link_str_df.columns = [link_str_df.columns.get_level_values(i).astype(float) \
+                    for i in range(len(link_str_df.columns.levels))]
             except FileNotFoundError:
                 continue
             date_summary = f'{dt.year}, {dt.strftime("%b")}'
-            print(f'{date_summary}: reading link strength data from pickle file {links_file}')
+            print(f'{date_summary}: reading link strength data from CSV file {links_file}')
 
             adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
             if args.edge_density:
