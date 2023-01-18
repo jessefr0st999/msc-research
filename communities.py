@@ -13,7 +13,7 @@ DATA_DIR = 'data/precipitation'
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--prec_seq_file', default='dataframe_alm_60_lag_0.pkl')
+    parser.add_argument('--prec_seq_file', default='prec_seq_alm_60_lag_0.pkl')
     parser.add_argument('--link_str_file', default='link_str_alm_60_lag_0_2022_03.csv')
     parser.add_argument('--output_folder', default=None)
     parser.add_argument('--edge_density', type=float, default=0.005)
