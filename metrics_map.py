@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from helpers import configure_plots, get_map, scatter_map
 
-METRICS_DIR = 'outputs/metric_maps'
+METRICS_DIR = 'outputs'
 
 metric_names = [
     'coreness',
@@ -23,7 +23,7 @@ def size_func(series):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--metrics_file_base', default='metrics_alm_60_lag_0_ed_0p005')
+    parser.add_argument('--metrics_file_base', default='metrics_corr_alm_60_lag_0_ed_0p005')
     parser.add_argument('--output_folder', default=None)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)

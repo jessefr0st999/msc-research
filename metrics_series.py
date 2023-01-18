@@ -29,7 +29,7 @@ def aggregate_series(series, agg_type, agg_cutoff, ema_half_life):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--metrics_file_base', default='metrics_alm_60_lag_0_ed_0p005')
+    parser.add_argument('--metrics_file_base', default='metrics_corr_alm_60_lag_0_ed_0p005')
     parser.add_argument('--output_folder', default=None)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
