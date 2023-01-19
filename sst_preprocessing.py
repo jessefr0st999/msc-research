@@ -60,7 +60,6 @@ def main():
                 month_df = day_row
             else:
                 month_df = pd.concat([month_df, day_row])
-            break
         month_row = month_df.mean(axis=0).to_frame().T
         month_row.index = [month_dt]
         if sst_df is None:
