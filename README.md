@@ -1,6 +1,6 @@
 ## Guide for running code in this repository
 
-### Raw data analysis
+### Raw precipitation data analysis
 
 For plots and statistical analysis of raw precipitation data, see raw_plots.py in the `slid-research` repository.
 
@@ -25,7 +25,7 @@ python month_plots.py
 python month_plots.py --all_locations
 ```
 
-### Complex networks analysis
+### Complex networks analysis of precipitation data
 
 Construct networks from precipitation data based on the following procedure:
 - First, prepare a dataframe from raw precipitation values by assigning a sequence of the previous `avg_lookback_months + lag_months` at a given location for a given timestamp.
@@ -97,4 +97,18 @@ Calculate and plot partitions/communities of graphs yielded by link strength mat
 - Asynchronous label propagation (`al_partitions`)
 ```sh
 python communities.py
+```
+
+### Sea surface temperature data
+
+The SST dataset being analysed can be obtained from https://cds.climate.copernicus.eu/cdsapp#!/dataset/satellite-sea-surface-temperature?tab=form. This dataset is of daily granularity from 1981 to 2022 and is of 0.05° x 0.05° spatial resolution.
+
+Read in raw SST files and pre-process into a new dataframe, with temporal aggregation via monthly averages and spatial downsampling by keeping only points on a 0.125° x 0.125° grid.
+```sh
+python sst_preprocessing.py --calculate_loc_filter
+```
+
+Plot the pre-processed values for the whole world for the most recent value as well as over Australia for the last year:
+```sh
+python sst_plots.py --output_folder outputs
 ```

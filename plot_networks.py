@@ -115,7 +115,6 @@ def main():
         figure_title += f'_m{start_dt.strftime("%m_%Y")}_{end_dt.strftime("%Y")}.png' \
             if args.month else \
             f'_{start_dt.strftime("%Y_%m")}_{end_dt.strftime("%Y_%m")}.png'
-    print(figure_title)
     show_or_save(figure, figure_title)
 
 if __name__ == '__main__':

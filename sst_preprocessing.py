@@ -74,4 +74,6 @@ def main():
     print(f'Pre-processed SST dataframe saved to file {data_file}')
 
 if __name__ == '__main__':
+    start = datetime.now()
     main()
+    print(f'Total time elapsed: {datetime.now() - start}')
