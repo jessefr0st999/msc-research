@@ -49,12 +49,6 @@ python plot_networks.py --output_folder outputs --start_year 2020
 python plot_networks.py --output_folder outputs --start_year 2021
 ```
 
-Repeat but for networks constructed only with values from July:
-```sh
-python link_strength_corr.py --month 7
-python plot_networks.py --output_folder outputs --month 7
-```
-
 Calculate the following metrics for graphs built from link strength matrices:
 - Average degree
 - Transitivity
@@ -65,7 +59,14 @@ Calculate the following metrics for graphs built from link strength matrices:
 - TODO: Global average link distance
 Save the metrics to Pickle files.
 ```sh
-python network_metrics.py --output_folder outputs
+python metrics.py
+```
+
+Repeat but for networks constructed only with values from July and with a larger lookback window:
+```sh
+python link_strength_corr.py --alm 120 --month 7
+python plot_networks.py --output_folder outputs --link_str_file_tag corr_alm_120 --start_year 2010 --month 7
+python metrics.py --link_str_file_tag corr_alm_120 --month 7
 ```
 
 Instead build link strength matrices using event synchronisation and event coincidence analysis:
@@ -86,7 +87,7 @@ python metrics_series.py
 
 Categorise locations in the dataset based on values of their location-dependent network metrics, rather than raw precipitation values.
 ```sh
-python k_means_metrics.py
+python metrics_k_means.py
 ```
 
 Calculate and plot partitions/communities of graphs yielded by link strength matrices using the following algorithms (see `networkx` documentation for details):
@@ -95,5 +96,5 @@ Calculate and plot partitions/communities of graphs yielded by link strength mat
 - Fluid communities (`af_partitions`; a number of communities must be specified)
 - Asynchronous label propagation (`al_partitions`)
 ```sh
-python network_communities.py
+python communities.py
 ```

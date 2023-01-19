@@ -42,7 +42,7 @@ def main():
     else:
         base_file_name += f'_lag_{args.lag_months}'
 
-    PREC_SEQ_FILE = f'{DATA_DIR}/dataframe{base_file_name}.pkl'
+    PREC_SEQ_FILE = f'{DATA_DIR}/prec_seq{base_file_name}.pkl'
     months = [args.month] if args.month else list(range(1, 13))
 
     ## Helper functions

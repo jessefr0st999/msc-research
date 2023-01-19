@@ -1,4 +1,3 @@
-import math
 import argparse
 
 import pandas as pd
@@ -7,7 +6,7 @@ import matplotlib.pyplot as plt
 
 from helpers import configure_plots
 
-METRICS_DIR = 'outputs'
+METRICS_DIR = 'data/metrics'
 
 def aggregate_series(series, agg_type, agg_cutoff, ema_half_life):
     if agg_type == 'simple_ma':

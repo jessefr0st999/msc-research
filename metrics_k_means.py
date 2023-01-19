@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from helpers import configure_plots
 from k_means import DECADE_INDICES, kmeans_fit, plot_clusters
 
-METRICS_FOLDER = 'outputs'
+METRICS_DIR = 'data/metrics'
 
 metric_names = [
     'coreness',
@@ -22,17 +22,17 @@ metric_names = [
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output_folder', default=None)
-    parser.add_argument('--metrics_file_base', default='metrics_alm_60_lag_0_ed_0p005')
+    parser.add_argument('--metrics_file_base', default='metrics_corr_alm_60_lag_0_ed_0p005')
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
-    coreness_file = f'{METRICS_FOLDER}/{args.metrics_file_base}_cor.pkl'
-    degree_file = f'{METRICS_FOLDER}/{args.metrics_file_base}_deg.pkl'
-    eccentricity_file = f'{METRICS_FOLDER}/{args.metrics_file_base}_ecc.pkl'
-    shortest_path_file = f'{METRICS_FOLDER}/{args.metrics_file_base}_sp.pkl'
-    betweenness_centrality_file = f'{METRICS_FOLDER}/{args.metrics_file_base}_b_cent.pkl'
-    closeness_centrality_file = f'{METRICS_FOLDER}/{args.metrics_file_base}_c_cent.pkl'
-    eigenvector_centrality_file = f'{METRICS_FOLDER}/{args.metrics_file_base}_e_cent.pkl'
+    coreness_file = f'{METRICS_DIR}/{args.metrics_file_base}_cor.pkl'
+    degree_file = f'{METRICS_DIR}/{args.metrics_file_base}_deg.pkl'
+    eccentricity_file = f'{METRICS_DIR}/{args.metrics_file_base}_ecc.pkl'
+    shortest_path_file = f'{METRICS_DIR}/{args.metrics_file_base}_sp.pkl'
+    betweenness_centrality_file = f'{METRICS_DIR}/{args.metrics_file_base}_b_cent.pkl'
+    closeness_centrality_file = f'{METRICS_DIR}/{args.metrics_file_base}_c_cent.pkl'
+    eigenvector_centrality_file = f'{METRICS_DIR}/{args.metrics_file_base}_e_cent.pkl'
     coreness_df: pd.DataFrame = pd.read_pickle(coreness_file)
     degree_df: pd.DataFrame = pd.read_pickle(degree_file)
     eccentricity_df: pd.DataFrame = pd.read_pickle(eccentricity_file)
