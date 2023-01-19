@@ -51,8 +51,9 @@ def main():
     ])
     for i, (df, metric_name) in enumerate(zip(dfs, metric_names)):
         # Decade 1 will have NaNs due to lookback window when constructing networks
+        # Either decade will have NaNs if using networks build from separate months
         d1 = np.array(df.iloc[DECADE_INDICES[0], :].dropna()).T
-        d2 = np.array(df.iloc[DECADE_INDICES[1], :]).T
+        d2 = np.array(df.iloc[DECADE_INDICES[1], :].dropna()).T
         for j, k in enumerate(k_list):
             _, sils_df.iloc[j, i] = kmeans_fit(k, d1)
             _, sils_df.iloc[j, len(metric_names) + i] = kmeans_fit(k, d2)
@@ -65,7 +66,7 @@ def main():
     for df, metric_name in zip(dfs, metric_names):
         # Decade 1 will have NaNs due to lookback window when constructing networks
         d1 = np.array(df.iloc[DECADE_INDICES[0], :].dropna()).T
-        d2 = np.array(df.iloc[DECADE_INDICES[1], :]).T
+        d2 = np.array(df.iloc[DECADE_INDICES[1], :].dropna()).T
         figure, axes = plt.subplots(2, 3, layout='compressed')
         axes = iter(axes.flatten())
         for k in k_list:
