@@ -41,19 +41,20 @@ def main():
         base_file_name += f'_m{month_str}'
     else:
         base_file_name += f'_lag_{args.lag_months}'
+    if args.deseasonalise:
+        base_file_name += '_des'
 
-    PREC_SEQ_FILE = f'{DATA_DIR}/prec_seq{base_file_name}.pkl'
+    prec_seq_file = f'{DATA_DIR}/prec_seq{base_file_name}.pkl'
     months = [args.month] if args.month else list(range(1, 13))
 
     ## Helper functions
 
     def deseasonalise(df):
         def row_func(row: pd.Series):
-            series_mean = row.mean()
+            datetime_index = pd.DatetimeIndex(row.index)
             for m in months:
-                month_series = row.loc[row.index.month == m]
-                # row.loc[row.index.month == m] = month_series.values / month_series.mean() * series_mean
-                row.loc[row.index.month == m] = month_series.values - month_series.mean() + series_mean
+                month_series = row.loc[datetime_index.month == m]
+                row.loc[datetime_index.month == m] = (month_series.values - month_series.mean()) / month_series.std()
             return row
         return df.apply(row_func, axis=1)
 
@@ -154,13 +155,13 @@ def main():
         df = df.set_index('date')
         return df
 
-    if Path(PREC_SEQ_FILE).is_file():
-        print(f'Reading precipitation sequences from pickle file {PREC_SEQ_FILE}')
-        prec_df: pd.DataFrame = pd.read_pickle(PREC_SEQ_FILE)
+    if Path(prec_seq_file).is_file():
+        print(f'Reading precipitation sequences from pickle file {prec_seq_file}')
+        prec_df: pd.DataFrame = pd.read_pickle(prec_seq_file)
     else:
-        print(f'Calculating precipitation sequences and saving to pickle file {PREC_SEQ_FILE}')
+        print(f'Calculating precipitation sequences and saving to pickle file {prec_seq_file}')
         prec_df = prepare_prec_df(pd.read_csv(DATA_FILE))
-        prec_df.to_pickle(PREC_SEQ_FILE)
+        prec_df.to_pickle(prec_seq_file)
 
     analysed_dt_count = 0
     for y in YEARS:
@@ -176,17 +177,15 @@ def main():
             except KeyError:
                 continue
             analysed_dt_count += 1
-            date_summary = f'{dt.year}, {dt.strftime("%b")}'
-            links_file = (f'{DATA_DIR}/link_str_corr{base_file_name}_{dt.year}')
-            if not args.month:
-                month_str = str(dt.month) if dt.month >= 10 else f'0{dt.month}'
-                links_file += f'_{month_str}'
+            links_file = (f'{DATA_DIR}/link_str_corr{base_file_name}')
             if args.link_str_geo_penalty:
                 links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
+            links_file += f'_{dt.strftime("%Y")}' if args.month else f'_{dt.strftime("%Y_%m")}'
+            links_file += '.csv'
+            date_summary = f'{dt.year}, {dt.strftime("%b")}'
             print(f'\n{date_summary}: calculating link strength data...')
             start = datetime.now()
             link_str_df = build_link_str_df(prec_dt)
-            links_file += '.csv'
             print((f'{date_summary}: link strengths calculated and saved to CSV file'
                 f' {links_file}; time elapsed: {datetime.now() - start}'))
             link_str_df.to_csv(links_file)
