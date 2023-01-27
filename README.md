@@ -25,6 +25,11 @@ python month_plots.py
 python month_plots.py --all_locations
 ```
 
+Perform complex PCA (as outlined in Horel 1984) on the precipitation dataset, producing plots of phase and amplitude of the first 6 (spatial) principal components and their temporal projections: 
+```sh
+python complex_pca.py --pcs_to_plot 6 --output_folder outputs
+```
+
 ### Complex networks analysis of precipitation data
 
 Construct networks from precipitation data based on the following procedure:
