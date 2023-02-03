@@ -85,37 +85,49 @@ def main():
             alpha=0.2, arrows=False)
         axis.set_title(date_summary)
 
-    figure, axes = plt.subplots(3, 4, layout='compressed')
-    axes = iter(axes.flatten())
-    start_dt = datetime(args.start_year, args.month or args.start_month, 1)
-    end_dt = start_dt + relativedelta(years=11) if args.month else \
-        start_dt + relativedelta(months=11)
-    for y in YEARS:
-        if args.month:
-            dt = datetime(y, args.month, 1)
-            if dt < start_dt or dt > end_dt:
-                continue
-            links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
-                f'_m{dt.strftime("%m_%Y")}.csv')
-            axis = next(axes)
-            network_map(axis, links_file, dt.strftime('%Y %b'))
-        else:
-            for m in MONTHS:
-                dt = datetime(y, m, 1)
+    graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' \
+        if args.edge_density \
+        else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
+    if 'decadal' in args.link_str_file_tag:
+        figure, axes = plt.subplots(1, 2, layout='compressed')
+        axes = iter(axes.flatten())
+        axis = next(axes)
+        links_file_d1 = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_d1.csv'
+        network_map(axis, links_file_d1, 'Decade 1')
+        axis = next(axes)
+        links_file_d2 = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_d2.csv'
+        network_map(axis, links_file_d2, 'Decade 2')
+        figure_title = f'networks_{args.link_str_file_tag}_{graph_file_tag}.png'
+        show_or_save(figure, figure_title)
+    else:
+        figure, axes = plt.subplots(3, 4, layout='compressed')
+        axes = iter(axes.flatten())
+        start_dt = datetime(args.start_year, args.month or args.start_month, 1)
+        end_dt = start_dt + relativedelta(years=11) if args.month else \
+            start_dt + relativedelta(months=11)
+        for y in YEARS:
+            if args.month:
+                dt = datetime(y, args.month, 1)
                 if dt < start_dt or dt > end_dt:
                     continue
                 links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
-                    f'_{dt.strftime("%Y_%m")}.csv')
+                    f'_m{dt.strftime("%m_%Y")}.csv')
                 axis = next(axes)
                 network_map(axis, links_file, dt.strftime('%Y %b'))
-        graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' \
-            if args.edge_density \
-            else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
-        figure_title = f'networks_{args.link_str_file_tag}_{graph_file_tag}'
-        figure_title += f'_m{start_dt.strftime("%m_%Y")}_{end_dt.strftime("%Y")}.png' \
-            if args.month else \
-            f'_{start_dt.strftime("%Y_%m")}_{end_dt.strftime("%Y_%m")}.png'
-    show_or_save(figure, figure_title)
+            else:
+                for m in MONTHS:
+                    dt = datetime(y, m, 1)
+                    if dt < start_dt or dt > end_dt:
+                        continue
+                    links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
+                        f'_{dt.strftime("%Y_%m")}.csv')
+                    axis = next(axes)
+                    network_map(axis, links_file, dt.strftime('%Y %b'))
+            figure_title = f'networks_{args.link_str_file_tag}_{graph_file_tag}'
+            figure_title += f'_m{start_dt.strftime("%m_%Y")}_{end_dt.strftime("%Y")}.png' \
+                if args.month else \
+                f'_{start_dt.strftime("%Y_%m")}_{end_dt.strftime("%Y_%m")}.png'
+        show_or_save(figure, figure_title)
 
 if __name__ == '__main__':
     main()

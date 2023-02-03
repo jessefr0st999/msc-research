@@ -13,6 +13,7 @@ DATA_DIR = 'data/precipitation'
 DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 
+DECADE_END_DATES = [datetime(2011, 4, 1), datetime(2022, 3, 1)]
 WHOLE_GRAPH_METRICS = [
     'asyn_lpa_partitions',
     'asyn_lpa_modularity',
@@ -49,10 +50,12 @@ def main():
     prec_df = pd.read_csv(DATA_FILE)
     prec_df.columns = pd.to_datetime(prec_df.columns, format='D%Y.%m')
     locations_df = pd.read_csv(LOCATIONS_FILE).set_index(['Lat', 'Lon'])
-    whole_graph_metrics_df = pd.DataFrame(np.nan, index=prec_df.columns,
-        columns=WHOLE_GRAPH_METRICS)
-    create_empty_df = lambda: pd.DataFrame(np.nan, index=prec_df.columns,
-        columns=locations_df.index)
+    whole_graph_metrics_df = pd.DataFrame(np.nan, columns=WHOLE_GRAPH_METRICS,
+        index=DECADE_END_DATES if 'decadal' in args.link_str_file_tag \
+            else prec_df.columns)
+    create_empty_df = lambda: pd.DataFrame(np.nan, columns=locations_df.index,
+        index=DECADE_END_DATES if 'decadal' in args.link_str_file_tag \
+            else prec_df.columns)
     coreness_df = create_empty_df()
     degree_df = create_empty_df()
     eccentricity_df = create_empty_df()
@@ -126,18 +129,24 @@ def main():
         print(f'{date_summary}: graph partitions: {partition_sizes}')
         print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
         
-    for y in YEARS:
-        if args.month:
-            dt = datetime(y, args.month, 1)
-            links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
-                f'_m{dt.strftime("%m_%Y")}.csv')
-            calculate_metrics(dt, links_file)
-        else:
-            for m in MONTHS:
-                dt = datetime(y, m, 1)
+    if 'decadal' in args.link_str_file_tag:
+        links_file_d1 = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_d1.csv'
+        calculate_metrics(DECADE_END_DATES[0], links_file_d1)
+        links_file_d2 = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_d2.csv'
+        calculate_metrics(DECADE_END_DATES[1], links_file_d2)
+    else:
+        for y in YEARS:
+            if args.month:
+                dt = datetime(y, args.month, 1)
                 links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
-                    f'_{dt.strftime("%Y_%m")}.csv')
+                    f'_m{dt.strftime("%m_%Y")}.csv')
                 calculate_metrics(dt, links_file)
+            else:
+                for m in MONTHS:
+                    dt = datetime(y, m, 1)
+                    links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
+                        f'_{dt.strftime("%Y_%m")}.csv')
+                    calculate_metrics(dt, links_file)
 
     graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' \
         if args.edge_density \

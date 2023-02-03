@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--link_str_geo_penalty', type=float, default=0)
     parser.add_argument('--no_anti_corr', '--nac', action='store_true', default=False)
     parser.add_argument('--deseasonalise', action='store_true', default=False)
+    parser.add_argument('--decadal', action='store_true', default=False)
     parser.add_argument('--month', type=int, default=None)
     # NOTE: This should not be used with lag
     parser.add_argument('--exp_kernel', type=float, default=None)
@@ -33,18 +34,20 @@ def main():
 
     args = parser.parse_args()
 
-    base_file_name = f'_alm_{args.avg_lookback_months}'
+    base_file = '_decadal' if args.decadal else f'_alm_{args.avg_lookback_months}'
     if args.file_tag:
-        base_file_name = f'{args.file_tag}{base_file_name}'
+        base_file = f'{args.file_tag}{base_file}'
     if args.month:
         month_str = str(args.month) if args.month >= 10 else f'0{args.month}'
-        base_file_name += f'_m{month_str}'
-    else:
-        base_file_name += f'_lag_{args.lag_months}'
+        base_file += f'_m{month_str}'
     if args.deseasonalise:
-        base_file_name += '_des'
+        base_file += '_des'
+    if args.decadal:
+        base_links_file = f'_lag_{args.lag_months}'
+    else:
+        base_file = base_links_file = f'_lag_{args.lag_months}'
 
-    prec_seq_file = f'{DATA_DIR}/prec_seq{base_file_name}.pkl'
+    prec_seq_file = f'{DATA_DIR}/prec_seq{base_file}.pkl'
     months = [args.month] if args.month else list(range(1, 13))
 
     ## Helper functions
@@ -132,23 +135,38 @@ def main():
         def seq_func(row: pd.Series):
             # Places value at current timestamp at end of list
             # Values decrease in time as the sequence goes left
-            def func(start_date, end_date, r: pd.Series):
-                sequence = list(r[(r.index > start_date) & (r.index <= end_date)])
-                seq_length = args.avg_lookback_months // 12 if args.month else args.avg_lookback_months + args.lag_months
-                if len(sequence) != seq_length:
-                    return None
-                if args.exp_kernel:
-                    sequence = exp_kernel(sequence, args.exp_kernel)
-                return sequence
-            vec_func = np.vectorize(func, excluded=['r'])
-            seq_lookback = args.avg_lookback_months if args.month else args.avg_lookback_months + args.lag_months
-            start_dates = [d - relativedelta(months=seq_lookback) for d in row.index]
-            end_dates = [d for d in row.index]
-            _row = vec_func(start_date=start_dates, end_date=end_dates, r=row)
-            return pd.Series(_row, index=row.index)
+            if args.decadal:
+                start_dates = [datetime(2000, 4, 1), datetime(2011, 3, 1)]
+                end_dates = [datetime(2011, 4, 1), datetime(2022, 3, 1)]
+                def func(start_date, end_date, r: pd.Series):
+                    sequence = list(r.loc[start_date : end_date])
+                    sequence.reverse()
+                    return sequence
+                _row = pd.Series([
+                    func(start_end[0], start_end[1], row) \
+                        for start_end in zip(start_dates, end_dates)
+                ], index=end_dates)
+            else:
+                def func(start_date, end_date, r: pd.Series):
+                    sequence = list(r[(r.index > start_date) & (r.index <= end_date)])
+                    seq_length = args.avg_lookback_months // 12 if args.month else \
+                        args.avg_lookback_months + args.lag_months
+                    if len(sequence) != seq_length:
+                        return None
+                    if args.exp_kernel:
+                        sequence = exp_kernel(sequence, args.exp_kernel)
+                    return sequence
+                vec_func = np.vectorize(func, excluded=['r'])
+                seq_lookback = args.avg_lookback_months if args.month else \
+                    args.avg_lookback_months + args.lag_months
+                start_dates = [d - relativedelta(months=seq_lookback) for d in row.index]
+                end_dates = [d for d in row.index]
+                _row = vec_func(start_date=start_dates, end_date=end_dates, r=row)
+                _row = pd.Series(_row, index=row.index)
+            return _row
         start = datetime.now()
         print('Constructing sequences...')
-        df = df.apply(seq_func, axis=1)
+        df = df.apply(seq_func, axis=1)       
         print(f'Sequences constructed; time elapsed: {datetime.now() - start}')
         df = df.stack().reset_index()
         df = df.rename(columns={'level_2': 'date', 0: 'prec_seq', 'Lat': 'lat', 'Lon': 'lon'})
@@ -163,32 +181,42 @@ def main():
         prec_df = prepare_prec_df(pd.read_csv(DATA_FILE))
         prec_df.to_pickle(prec_seq_file)
 
-    analysed_dt_count = 0
-    for y in YEARS:
-        for m in months:
-            if args.dt_limit and analysed_dt_count == args.dt_limit:
-                break
-            dt = datetime(y, m, 1)
-            try:
-                prec_dt = prec_df.loc[dt]
-                # Skip unless the sequence based on the specified lookback time is available
-                if prec_dt['prec_seq'].isnull().values.any():
+    if args.decadal:
+        d1_link_str_df = build_link_str_df(prec_df.loc[prec_df.index[0]])
+        d2_link_str_df = build_link_str_df(prec_df.loc[prec_df.index[1]])
+        d1_link_str_df_file = f'{DATA_DIR}/link_str_corr{base_links_file}_d1.csv'
+        d2_link_str_df_file = f'{DATA_DIR}/link_str_corr{base_links_file}_d2.csv'
+        d1_link_str_df.to_csv(d1_link_str_df_file)
+        d2_link_str_df.to_csv(d2_link_str_df_file)
+        print(f'Decadal link strengths calculated and saved to CSV files'
+            f' {d1_link_str_df_file} and {d2_link_str_df_file}')
+    else:
+        analysed_dt_count = 0
+        for y in YEARS:
+            for m in months:
+                if args.dt_limit and analysed_dt_count == args.dt_limit:
+                    break
+                dt = datetime(y, m, 1)
+                try:
+                    prec_dt = prec_df.loc[dt]
+                    # Skip unless the sequence based on the specified lookback time is available
+                    if prec_dt['prec_seq'].isnull().values.any():
+                        continue
+                except KeyError:
                     continue
-            except KeyError:
-                continue
-            analysed_dt_count += 1
-            links_file = (f'{DATA_DIR}/link_str_corr{base_file_name}')
-            if args.link_str_geo_penalty:
-                links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
-            links_file += f'_{dt.strftime("%Y")}' if args.month else f'_{dt.strftime("%Y_%m")}'
-            links_file += '.csv'
-            date_summary = f'{dt.year}, {dt.strftime("%b")}'
-            print(f'\n{date_summary}: calculating link strength data...')
-            start = datetime.now()
-            link_str_df = build_link_str_df(prec_dt)
-            print((f'{date_summary}: link strengths calculated and saved to CSV file'
-                f' {links_file}; time elapsed: {datetime.now() - start}'))
-            link_str_df.to_csv(links_file)
+                analysed_dt_count += 1
+                links_file = (f'{DATA_DIR}/link_str_corr{base_links_file}')
+                if args.link_str_geo_penalty:
+                    links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
+                links_file += f'_{dt.strftime("%Y")}' if args.month else f'_{dt.strftime("%Y_%m")}'
+                links_file += '.csv'
+                date_summary = f'{dt.year}, {dt.strftime("%b")}'
+                print(f'\n{date_summary}: calculating link strength data...')
+                start = datetime.now()
+                link_str_df = build_link_str_df(prec_dt)
+                print((f'{date_summary}: link strengths calculated and saved to CSV file'
+                    f' {links_file}; time elapsed: {datetime.now() - start}'))
+                link_str_df.to_csv(links_file)
 
 if __name__ == '__main__':
     start = datetime.now()

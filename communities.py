@@ -4,10 +4,10 @@ from datetime import datetime
 import networkx as nx
 import pandas as pd
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 from networkx.algorithms import community
-from helpers import read_link_str_df, get_map
+
+from helpers import read_link_str_df, configure_plots, get_map
 
 DATA_DIR = 'data/precipitation'
 
@@ -19,12 +19,17 @@ def main():
     parser.add_argument('--edge_density', type=float, default=0.005)
     parser.add_argument('--num_af_communities', type=int, default=6)
     args = parser.parse_args()
+    label_size, font_size, show_or_save = configure_plots(args)
 
     prec_seq_df = pd.read_pickle(f'{DATA_DIR}/{args.prec_seq_file}')
     link_str_df = read_link_str_df(f'{DATA_DIR}/{args.link_str_file}')
     try:
-        date_part = args.link_str_file.split('lag_')[1].split('.csv')[0]
-        _, year, month = date_part.split('_')
+        if 'decadal' in args.link_str_file:
+            year, month = (2011, 4) if 'd1' in args.link_str_file \
+                else (2022, 3)
+        else:
+            date_part = args.link_str_file.split('lag_')[1].split('.csv')[0]
+            _, year, month = date_part.split('_')
     except IndexError:
         # Month-only link strength files
         year = int(args.link_str_file.split('_')[-1][:4])
@@ -87,16 +92,11 @@ def main():
     for (axis, colours) in zip (axes, [lv_node_colours, gm_node_colours,
             af_node_colours, al_node_colours]):
         nx.draw_networkx_nodes(G=lcc_graph, pos=pos, nodelist=lcc_graph.nodes(),
-            node_color=colours, alpha=0.8, ax=axis,
-            node_size=[5 + 1.5*adjacency[location].sum() for location in lcc_graph.nodes()])
+            node_color=colours, alpha=0.8, ax=axis, node_size=80)
         nx.draw_networkx_edges(G=lcc_graph, pos=pos, edge_color='gray',
             alpha=0.2, arrows=False, ax=axis)
-    if args.output_folder:
-        filename = (f'{args.output_folder}/communities_ed_{str(args.edge_density).replace(".", "p")}'
-            f'_{args.link_str_file.split("link_str_")[1]}.png')
-        plt.savefig(filename, bbox_inches='tight')
-        print(f'Saved to file {filename}')
-    else:
-        plt.show()
+    filename = (f'communities_ed_{str(args.edge_density).replace(".", "p")}'
+        f'_{args.link_str_file.split("link_str_")[1].split(".csv")[0]}.png')
+    show_or_save(figure, filename)
 
 main()

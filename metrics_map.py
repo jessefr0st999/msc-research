@@ -41,7 +41,7 @@ def main():
         betweenness_centrality_df, closeness_centrality_df]
     df_mins = [df.min().min() for df in dfs]
     df_maxes = [df.max().max() for df in dfs]
-    for dt in coreness_df.index.values:
+    for i, dt in enumerate(coreness_df.index.values):
         if coreness_df.loc[dt].isnull().all():
             continue
         figure, axes = plt.subplots(2, 3, layout='compressed')
@@ -54,7 +54,9 @@ def main():
             scatter_map(axis, mx, my, series, cb_min=df_min, cb_max=df_max, cb_fs=label_size,
                 size_func=lambda series: 100 if args.output_folder else 20)
             axis.set_title(f'{pd.to_datetime(dt).strftime("%b %Y")}: {metric_name}')
-        show_or_save(figure, f'metrics_map_{pd.to_datetime(dt).strftime("%Y_%m")}.png')
+        label = f'd{i + 1}' if 'decadal' in args.metrics_file_base else \
+            pd.to_datetime(dt).strftime("%Y_%m")
+        show_or_save(figure, f'metrics_map_{label}.png')
 
 if __name__ == '__main__':
     main()
