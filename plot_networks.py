@@ -15,8 +15,8 @@ YEARS = list(range(2000, 2022 + 1))
 MONTHS = list(range(1, 13))
 DATA_DIR = 'data/precipitation'
 OUTPUTS_DIR = 'data/outputs'
-DATA_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
+GEO_AGG_PREC_FILE = f'{DATA_DIR}/prec_df_agg.pkl'
 
 def create_graph(adjacency: pd.DataFrame):
     graph = nx.from_numpy_array(adjacency.values)
@@ -52,9 +52,13 @@ def main():
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
-    locations_df = pd.read_csv(LOCATIONS_FILE)
-    lats = locations_df['Lat']
-    lons = locations_df['Lon']
+    if 'geo_agg' in args.link_str_file_tag:
+        prec_geo_agg_df = pd.read_pickle(GEO_AGG_PREC_FILE)
+        lats, lons = zip(*prec_geo_agg_df.columns)
+    else:
+        locations_df = pd.read_csv(LOCATIONS_FILE)
+        lats = locations_df['Lat']
+        lons = locations_df['Lon']
 
     def network_map(axis, links_file, date_summary):
         try:

@@ -11,9 +11,9 @@ YEARS = list(range(2000, 2022 + 1))
 LINK_STR_METHOD = None
 # LINK_STR_METHOD = 'max'
 DATA_DIR = 'data/precipitation'
-OUTPUTS_DIR = 'data/outputs'
-DATA_FILE = f'{DATA_DIR}/FusedData.csv'
+PREC_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
+GEO_AGG_PREC_FILE = f'{DATA_DIR}/prec_df_agg.pkl'
 
 def main():
     parser = argparse.ArgumentParser()
@@ -24,6 +24,7 @@ def main():
     parser.add_argument('--no_anti_corr', '--nac', action='store_true', default=False)
     parser.add_argument('--deseasonalise', action='store_true', default=False)
     parser.add_argument('--decadal', action='store_true', default=False)
+    parser.add_argument('--geo_agg', action='store_true', default=False)
     parser.add_argument('--month', type=int, default=None)
     # NOTE: This should not be used with lag
     parser.add_argument('--exp_kernel', type=float, default=None)
@@ -40,12 +41,11 @@ def main():
     if args.month:
         month_str = str(args.month) if args.month >= 10 else f'0{args.month}'
         base_file += f'_m{month_str}'
-    if args.deseasonalise:
-        base_file += '_des'
-    if args.decadal:
-        base_links_file = f'_lag_{args.lag_months}'
-    else:
-        base_file = base_links_file = f'_lag_{args.lag_months}'
+    base_file += '_geo_agg' if args.geo_agg else ''
+    base_file += '_des' if args.deseasonalise else ''
+    base_links_file = f'{base_file}_lag_{args.lag_months}'
+    if not args.decadal:
+        base_file += f'_lag_{args.lag_months}'
 
     prec_seq_file = f'{DATA_DIR}/prec_seq{base_file}.pkl'
     months = [args.month] if args.month else list(range(1, 13))
@@ -123,11 +123,15 @@ def main():
         # TODO: reimplement link_str_geo_penalty between pairs of points
         return link_str_df
 
-    def prepare_prec_df(input_df):
-        input_df.columns = pd.to_datetime(input_df.columns, format='D%Y.%m')
-        df_locations = pd.read_csv(LOCATIONS_FILE)
-        df = pd.concat([df_locations, input_df], axis=1)
-        df = df.set_index(['Lat', 'Lon'])
+    def prepare_prec_df():
+        if args.geo_agg:
+            df = pd.read_pickle(GEO_AGG_PREC_FILE).T
+        else:
+            raw_df = pd.read_csv(PREC_FILE)
+            raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')
+            locations_df = pd.read_csv(LOCATIONS_FILE)
+            df = pd.concat([locations_df, raw_df], axis=1)
+            df = df.set_index(['Lat', 'Lon'])
         if args.month:
             df = df.loc[:, [c.month == args.month for c in df.columns]]
         if args.deseasonalise:
@@ -178,7 +182,7 @@ def main():
         prec_df: pd.DataFrame = pd.read_pickle(prec_seq_file)
     else:
         print(f'Calculating precipitation sequences and saving to pickle file {prec_seq_file}')
-        prec_df = prepare_prec_df(pd.read_csv(DATA_FILE))
+        prec_df = prepare_prec_df()
         prec_df.to_pickle(prec_seq_file)
 
     if args.decadal:

@@ -27,18 +27,23 @@ def configure_plots(args):
             plt.show()
     return label_size, font_size, show_or_save
 
-def get_map(axis=None):
-    _map = Basemap(
-        projection='merc',
-        llcrnrlon=110,
-        llcrnrlat=-45,
-        urcrnrlon=155,
-        urcrnrlat=-10,
+
+def get_map(axis=None, aus=True):
+    kwargs = dict(
         lat_ts=0,
         resolution='l',
         suppress_ticks=True,
         ax=axis,
     )
+    if aus:
+        kwargs |= dict(
+            projection='merc',
+            llcrnrlon=110,
+            llcrnrlat=-45,
+            urcrnrlon=155,
+            urcrnrlat=-10,
+        )
+    _map = Basemap(**kwargs)
     _map.drawcountries(linewidth=1)
     _map.drawstates(linewidth=0.2)
     _map.drawcoastlines(linewidth=1)

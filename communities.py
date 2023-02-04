@@ -92,9 +92,11 @@ def main():
     for (axis, colours) in zip (axes, [lv_node_colours, gm_node_colours,
             af_node_colours, al_node_colours]):
         nx.draw_networkx_nodes(G=lcc_graph, pos=pos, nodelist=lcc_graph.nodes(),
-            node_color=colours, alpha=0.8, ax=axis, node_size=80)
+            node_color=colours, alpha=0.8, ax=axis,
+            node_size=400 if 'geo_agg' in args.link_str_file else 80)
         nx.draw_networkx_edges(G=lcc_graph, pos=pos, edge_color='gray',
-            alpha=0.2, arrows=False, ax=axis)
+            alpha=0.2, arrows=False, ax=axis,
+            width=2 if 'geo_agg' in args.link_str_file else 1)
     filename = (f'communities_ed_{str(args.edge_density).replace(".", "p")}'
         f'_{args.link_str_file.split("link_str_")[1].split(".csv")[0]}.png')
     show_or_save(figure, filename)
