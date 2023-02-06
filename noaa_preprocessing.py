@@ -1,6 +1,7 @@
 import argparse
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from pathlib import Path
 
 import pandas as pd
 import xarray as xr
@@ -24,29 +25,44 @@ def main():
     df: pd.DataFrame = xr.open_dataset(f'{DATA_DIR}/{args.data_file}',
         decode_times=False).to_dataframe()
 
-    if args.dataset == 'slp':
-        df = df.reset_index().pivot_table(values='pressure', index='T', columns=['X', 'Y'])
-        df.index = df.index.map(lambda dt: datetime(1960, 1, 1) + relativedelta(months=int(dt)))
-        df.columns = df.columns.rename(('lon', 'lat')).swaplevel(0, 1)
-        df.columns = df.columns.map(lambda lat_lon: (lat_lon[0], lat_lon[1] - 180))
-        save_df(df, 'slp')
-    elif args.dataset == 'omega':
-        # NOTE: this takes quite a while (~10 mins)
-        df = df.reset_index().pivot_table(values='omega', index=['time', 'level'],
-            columns=['lat', 'lon'])
+    def multi_level(df, measure, name):
+        # NOTE: this takes quite a while (~10 mins), hence save to pickle
+        file_name = f'{DATA_DIR}/{name}_df.pkl'
+        if Path(file_name).is_file():
+            df = pd.read_pickle(file_name)
+        else:
+            df = df.reset_index().pivot_table(values=measure, index=['time', 'level'],
+                columns=['lat', 'lon'])
+            df.to_pickle(file_name)
         for level, _df in df.groupby('level'):
             _df = _df.droplevel('level')
             _df.index = _df.index.map(lambda dt: datetime(1800, 1, 1) + relativedelta(hours=int(dt)))
             _df.columns = _df.columns.map(lambda lat_lon: (lat_lon[0], lat_lon[1] - 180))
-            save_df(_df, f'omega_level_{int(level)}')
+            save_df(_df, f'{name}_level_{int(level)}')
+        return df
+
+    if args.dataset == 'slp':
+        df = df.reset_index().pivot_table(values='pressure', index='T', columns=['X', 'Y'])
+        df.index = df.index.map(lambda dt: datetime(1960, 1, 1) + relativedelta(months=int(dt)))
+        df.columns = df.columns.rename(('lon', 'lat')).swaplevel(0, 1)
+    elif args.dataset == 'omega':
+        _ = multi_level(df, 'omega', 'omega')
+        return
+    elif args.dataset == 'humidity':
+        _ = multi_level(df, 'rhum', 'humidity')
+        return
     elif args.dataset == 'temp_max':
         df = df.reset_index().pivot_table(values='tmax', index=['time', 'level'],
             columns=['lat', 'lon'])
         df = df.droplevel('level')
         df.index = df.index.map(lambda dt: datetime(1800, 1, 1) + relativedelta(hours=int(dt)))
-        df.columns = df.columns.map(lambda lat_lon: (lat_lon[0], lat_lon[1] - 180))
         df -= 273.15
-        save_df(df, 'temp_max')
+    elif args.dataset == 'pr_water':
+        df = df.reset_index().pivot_table(values='pr_wtr', index='time',
+            columns=['lat', 'lon'])
+        df.index = df.index.map(lambda dt: datetime(1800, 1, 1) + relativedelta(hours=int(dt)))
+    df.columns = df.columns.map(lambda lat_lon: (lat_lon[0], lat_lon[1] - 180))
+    save_df(df, args.dataset)
 
 if __name__ == '__main__':
     start = datetime.now()
