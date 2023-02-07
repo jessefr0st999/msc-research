@@ -21,6 +21,18 @@ def main():
         df.to_pickle(data_file)
         print(f'Pre-processed {name} dataframe saved to file {data_file}')
 
+    # NCAR data (15N to 90N only)
+    # data_file = f'{DATA_DIR}/ds010.1.20000100.20221231'
+    # df = pd.read_fwf(data_file, index_col=[0])
+    # df = df.drop(labels='90N', axis=1)
+    # df.index = pd.to_datetime(df.index, format='%Y/%m')
+    # def loc_str_to_lat_lon(loc_str):
+    #     loc_list = loc_str.split(',')
+    #     lat = int(loc_list[1][: -1])
+    #     lon = int(loc_list[0][: -1]) - 180
+    #     return (lat, lon)
+    # df.columns = pd.Index([loc_str_to_lat_lon(c) for c in df.columns])
+
     # NCEP-NCAR reanalysis data
     df: pd.DataFrame = xr.open_dataset(f'{DATA_DIR}/{args.data_file}',
         decode_times=False).to_dataframe()
@@ -51,7 +63,7 @@ def main():
     elif args.dataset == 'humidity':
         _ = multi_level(df, 'rhum', 'humidity')
         return
-    elif args.dataset == 'temp_max':
+    elif args.dataset == 'temp':
         df = df.reset_index().pivot_table(values='tmax', index=['time', 'level'],
             columns=['lat', 'lon'])
         df = df.droplevel('level')

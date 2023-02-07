@@ -5,40 +5,19 @@ import argparse
 import pandas as pd
 import numpy as np
 import networkx as nx
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-from mpl_toolkits.basemap import Basemap
 
-from helpers import *
+from helpers import get_map, configure_plots, read_link_str_df
 
 YEARS = list(range(2000, 2022 + 1))
 MONTHS = list(range(1, 13))
-DATA_DIR = 'data/precipitation'
 OUTPUTS_DIR = 'data/outputs'
-LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
-GEO_AGG_PREC_FILE = f'{DATA_DIR}/prec_df_agg.pkl'
+LOCATIONS_FILE = f'data/precipitation/Fused.Locations.csv'
 
 def create_graph(adjacency: pd.DataFrame):
     graph = nx.from_numpy_array(adjacency.values)
     graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
     return graph
-
-def get_map(axis=None):
-    _map = Basemap(
-        projection='merc',
-        llcrnrlon=110,
-        llcrnrlat=-45,
-        urcrnrlon=155,
-        urcrnrlat=-10,
-        lat_ts=0,
-        resolution='l',
-        suppress_ticks=True,
-        ax=axis,
-    )
-    _map.drawcountries(linewidth=1)
-    _map.drawstates(linewidth=0.2)
-    _map.drawcoastlines(linewidth=1)
-    return _map
 
 def main():
     parser = argparse.ArgumentParser()
@@ -48,17 +27,12 @@ def main():
     parser.add_argument('--start_year', type=int, default=2021)
     parser.add_argument('--start_month', type=int, default=4)
     parser.add_argument('--month', type=int, default=None)
+    parser.add_argument('--data_dir', default='data/precipitation')
+    parser.add_argument('--fmt', default='csv')
+    parser.add_argument('--plot_world', action='store_true', default=False)
     parser.add_argument('--link_str_file_tag', default='corr_alm_60_lag_0')
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
-
-    if 'geo_agg' in args.link_str_file_tag:
-        prec_geo_agg_df = pd.read_pickle(GEO_AGG_PREC_FILE)
-        lats, lons = zip(*prec_geo_agg_df.columns)
-    else:
-        locations_df = pd.read_csv(LOCATIONS_FILE)
-        lats = locations_df['Lat']
-        lons = locations_df['Lon']
 
     def network_map(axis, links_file, date_summary):
         try:
@@ -76,7 +50,8 @@ def main():
         if not args.edge_density:
             _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
             print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
-        _map = get_map(axis)
+        _map = get_map(axis, aus=not args.plot_world)
+        lats, lons = zip(*link_str_df.columns)
         map_x, map_y = _map(lons, lats)
         graph = create_graph(adjacency)
         pos = {}
@@ -93,13 +68,13 @@ def main():
         if args.edge_density \
         else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
     if 'decadal' in args.link_str_file_tag:
-        figure, axes = plt.subplots(1, 2, layout='compressed')
+        figure, axes = plt.subplots(2, 1, layout='compressed')
         axes = iter(axes.flatten())
         axis = next(axes)
-        links_file_d1 = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_d1.csv'
+        links_file_d1 = f'{args.data_dir}/link_str_{args.link_str_file_tag}_d1.{args.fmt}'
         network_map(axis, links_file_d1, 'Decade 1')
         axis = next(axes)
-        links_file_d2 = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_d2.csv'
+        links_file_d2 = f'{args.data_dir}/link_str_{args.link_str_file_tag}_d2.{args.fmt}'
         network_map(axis, links_file_d2, 'Decade 2')
         figure_title = f'networks_{args.link_str_file_tag}_{graph_file_tag}.png'
         show_or_save(figure, figure_title)
@@ -114,8 +89,8 @@ def main():
                 dt = datetime(y, args.month, 1)
                 if dt < start_dt or dt > end_dt:
                     continue
-                links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
-                    f'_m{dt.strftime("%m_%Y")}.csv')
+                links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
+                    f'_m{dt.strftime("%m_%Y")}.{args.fmt}')
                 axis = next(axes)
                 network_map(axis, links_file, dt.strftime('%Y %b'))
             else:
@@ -123,8 +98,8 @@ def main():
                     dt = datetime(y, m, 1)
                     if dt < start_dt or dt > end_dt:
                         continue
-                    links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
-                        f'_{dt.strftime("%Y_%m")}.csv')
+                    links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
+                        f'_{dt.strftime("%Y_%m")}.{args.fmt}')
                     axis = next(axes)
                     network_map(axis, links_file, dt.strftime('%Y %b'))
             figure_title = f'networks_{args.link_str_file_tag}_{graph_file_tag}'

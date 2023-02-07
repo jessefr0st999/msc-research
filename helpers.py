@@ -6,8 +6,11 @@ import matplotlib.pyplot as plt
 from networkx.algorithms import community
 from mpl_toolkits.basemap import Basemap
 
-def read_link_str_df(filename):
-    link_str_df = pd.read_csv(filename, index_col=[0, 1], header=[0, 1])
+def read_link_str_df(filename: str):
+    if filename.endswith('pkl'):
+        link_str_df = pd.read_pickle(filename)
+    else: # Assume CSV
+        link_str_df = pd.read_csv(filename, index_col=[0, 1], header=[0, 1])
     link_str_df.columns = [link_str_df.columns.get_level_values(i).astype(float) \
         for i in range(len(link_str_df.columns.levels))]
     return link_str_df

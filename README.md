@@ -43,7 +43,7 @@ Construct networks from precipitation data based on the following procedure:
 - Use `edge_density` or `link_str_threshold` to define an adjanency matrix based on the link strength matrix, then construct a `networkx` graph object based on this adjacency matrix.
 The precipitation dataframe and link strength matrices from the resulting graphs are saved to CSV files.
 ```sh
-python link_strength_corr.py
+python links_corr.py
 ```
 
 Plot these networks for the last few years:
@@ -69,15 +69,15 @@ python metrics.py
 
 Repeat but for networks constructed only with values from July and with a larger lookback window:
 ```sh
-python link_strength_corr.py --alm 120 --month 7
+python links_corr.py --alm 120 --month 7
 python plot_networks.py --output_folder outputs --link_str_file_tag corr_alm_120 --start_year 2010 --month 7
 python metrics.py --link_str_file_tag corr_alm_120 --month 7
 ```
 
 Instead build link strength matrices using event synchronisation and event coincidence analysis:
 ```sh
-python link_strength_es.py --method sync
-python link_strength_es.py --method ca
+python links_es.py --method sync
+python links_es.py --method ca
 ```
 
 Plot location-dependent network metrics on a map:
