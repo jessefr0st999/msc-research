@@ -8,8 +8,8 @@ import numpy as np
 # from geopy.distance import geodesic
 
 YEARS = list(range(2000, 2022 + 1))
-LINK_STR_METHOD = None
-# LINK_STR_METHOD = 'max'
+# LINK_STR_METHOD = None
+LINK_STR_METHOD = 'max'
 DATA_DIR = 'data/precipitation'
 PREC_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
