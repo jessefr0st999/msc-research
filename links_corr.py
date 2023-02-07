@@ -72,7 +72,7 @@ def main():
     def calculate_link_str(df: pd.DataFrame, method) -> pd.Series:
         if method == 'max':
             return df.max(axis=1)
-        # Default: as in De Castro Santos
+        # Default: as in Ludescher 2014
         return (df.max(axis=1) - df.mean(axis=1)) / df.std(axis=1)
 
     def build_link_str_df(df: pd.DataFrame):
