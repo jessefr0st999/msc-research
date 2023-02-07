@@ -86,15 +86,15 @@ def main():
     axes[1].set_title(f'{dt.strftime("%b %Y")}: gm_partitions, {len(gm_partitions)} communities')
     axes[2].set_title(f'{dt.strftime("%b %Y")}: af_partitions, {args.num_af_communities} communities')
     axes[3].set_title(f'{dt.strftime("%b %Y")}: al_partitions, {len(al_partitions)} communities')
-    lv_map = get_map(axes[0])
-    gm_map = get_map(axes[1])
-    af_map = get_map(axes[2])
-    al_map = get_map(axes[3])
-    mx, my = lv_map(dt_prec_seq_df['lon'], dt_prec_seq_df['lat'])
+    lv_map = get_map(axes[0], aus=not args.plot_world)
+    gm_map = get_map(axes[1], aus=not args.plot_world)
+    af_map = get_map(axes[2], aus=not args.plot_world)
+    al_map = get_map(axes[3], aus=not args.plot_world)
+    mx, my = lv_map(dt_seq_df['lon'], dt_seq_df['lat'])
     pos = {}
     for i, elem in enumerate(adjacency.index):
         pos[elem] = (mx[i], my[i])
-    for (axis, colours) in zip (axes, [lv_node_colours, gm_node_colours,
+    for (axis, colours) in zip(axes, [lv_node_colours, gm_node_colours,
             af_node_colours, al_node_colours]):
         nx.draw_networkx_nodes(G=lcc_graph, pos=pos, nodelist=lcc_graph.nodes(),
             node_color=colours, alpha=0.8, ax=axis,
