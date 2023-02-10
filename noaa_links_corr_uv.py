@@ -29,7 +29,6 @@ def main():
     parser.add_argument('--land_only', action='store_true', default=False)
     args = parser.parse_args()
     
-    # Plot the most recent values over the whole world
     df: pd.DataFrame = pd.read_pickle(f'{DATA_DIR}/{args.data_file}')
     dataset = args.data_file.split('_')[0]
     # Remove columns above/below +/- 60 degrees latitude
@@ -39,7 +38,7 @@ def main():
             columns_to_keep.append((lat, lon))
     df = df[columns_to_keep]
     if args.ocean_only or args.land_only:
-        ocean_locations_file = 'ocean_locations.pkl'
+        ocean_locations_file = f'ocean_locations_{dataset}.pkl'
         # ocean_locations = []
         # with open(OCEANS_GEOJSON) as f:
         #     geojson = json.load(f)

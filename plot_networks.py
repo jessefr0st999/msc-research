@@ -7,17 +7,31 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 
-from helpers import get_map, configure_plots, read_link_str_df
+from helpers import get_map, configure_plots, read_link_str_df, link_str_to_adjacency
 
 YEARS = list(range(2000, 2022 + 1))
 MONTHS = list(range(1, 13))
 OUTPUTS_DIR = 'data/outputs'
 LOCATIONS_FILE = f'data/precipitation/Fused.Locations.csv'
 
-def create_graph(adjacency: pd.DataFrame):
+def network_map(axis, link_str_df, edge_density=None, threshold=None,
+        plot_world=False, lag_bool_df=None):
+    adjacency = link_str_to_adjacency(link_str_df, edge_density,
+        threshold, lag_bool_df)
+    _map = get_map(axis, aus=not plot_world)
+    lats, lons = zip(*adjacency.columns)
+    map_x, map_y = _map(lons, lats)
     graph = nx.from_numpy_array(adjacency.values)
     graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
-    return graph
+    pos = {}
+    for i, elem in enumerate(adjacency.index):
+        pos[elem] = (map_x[i], map_y[i])
+    node_sizes = [adjacency[location].sum() / 5 for location in graph.nodes()]
+    # node_sizes = [3 for _ in graph.nodes()]
+    nx.draw_networkx_nodes(ax=axis, G=graph, pos=pos, nodelist=graph.nodes(),
+        node_color='r', alpha=0.8, node_size=node_sizes)
+    nx.draw_networkx_edges(ax=axis, G=graph, pos=pos, edge_color='g',
+        alpha=0.2, arrows=False)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -30,53 +44,48 @@ def main():
     parser.add_argument('--data_dir', default='data/precipitation')
     parser.add_argument('--fmt', default='csv')
     parser.add_argument('--plot_world', action='store_true', default=False)
+    parser.add_argument('--last_dt', action='store_true', default=False)
     parser.add_argument('--link_str_file_tag', default='corr_alm_60_lag_0')
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
-    def network_map(axis, links_file, date_summary):
-        try:
-            link_str_df = read_link_str_df(links_file)
-        except FileNotFoundError:
-            return
-        print(f'{date_summary}: reading link strength data from CSV file {links_file}')
-        adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
-        if args.edge_density:
-            threshold = np.quantile(link_str_df, 1 - args.edge_density)
-            print(f'{date_summary}: fixed edge density {args.edge_density} gives threshold {threshold}')
-        else:
-            threshold = args.link_str_threshold
-        adjacency[link_str_df >= threshold] = 1
-        if not args.edge_density:
-            _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
-            print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
-        _map = get_map(axis, aus=not args.plot_world)
-        lats, lons = zip(*link_str_df.columns)
-        map_x, map_y = _map(lons, lats)
-        graph = create_graph(adjacency)
-        pos = {}
-        for i, elem in enumerate(adjacency.index):
-            pos[elem] = (map_x[i], map_y[i])
-        node_sizes = [adjacency[location].sum() / 5 for location in graph.nodes()]
-        nx.draw_networkx_nodes(ax=axis, G=graph, pos=pos, nodelist=graph.nodes(),
-            node_color='r', alpha=0.8, node_size=node_sizes)
-        nx.draw_networkx_edges(ax=axis, G=graph, pos=pos, edge_color='g',
-            alpha=0.2, arrows=False)
-        axis.set_title(date_summary)
-
     graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' \
         if args.edge_density \
         else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
+    network_map_kw = {
+        'plot_world': args.plot_world,
+        'edge_density': args.edge_density,
+        'threshold': args.link_str_threshold,
+    }
     if 'decadal' in args.link_str_file_tag:
         figure, axes = plt.subplots(2, 1, layout='compressed')
         axes = iter(axes.flatten())
+
+        links_file = f'{args.data_dir}/link_str_{args.link_str_file_tag}_d1'
+        link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
         axis = next(axes)
-        links_file_d1 = f'{args.data_dir}/link_str_{args.link_str_file_tag}_d1.{args.fmt}'
-        network_map(axis, links_file_d1, 'Decade 1')
+        network_map(axis, link_str_df, **network_map_kw)
+        axis.set_title('Decade 1')
+
+        links_file = f'{args.data_dir}/link_str_{args.link_str_file_tag}_d2'
+        link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
         axis = next(axes)
-        links_file_d2 = f'{args.data_dir}/link_str_{args.link_str_file_tag}_d2.{args.fmt}'
-        network_map(axis, links_file_d2, 'Decade 2')
+        network_map(axis, link_str_df, **network_map_kw)
+        axis.set_title('Decade 2')
+
         figure_title = f'networks_{args.link_str_file_tag}_{graph_file_tag}.png'
+        show_or_save(figure, figure_title)
+    elif args.last_dt:
+        figure, axis = plt.subplots(1, layout='compressed')
+        dt = datetime(2022, 3, 1)
+        links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
+            f'_{dt.strftime("%Y_%m")}')
+        link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
+        network_map(axis, link_str_df, **network_map_kw)
+        axis.set_title(dt.strftime('%Y %b'))
+        figure_title = (f'networks_{args.link_str_file_tag}_{graph_file_tag}'
+            f'_{dt.strftime("%Y_%m")}.png')
+        print(figure_title)
         show_or_save(figure, figure_title)
     else:
         figure, axes = plt.subplots(3, 4, layout='compressed')
@@ -90,18 +99,21 @@ def main():
                 if dt < start_dt or dt > end_dt:
                     continue
                 links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
-                    f'_m{dt.strftime("%m_%Y")}.{args.fmt}')
+                    f'_m{dt.strftime("%m_%Y")}')
+                link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
                 axis = next(axes)
-                network_map(axis, links_file, dt.strftime('%Y %b'))
+                network_map(axis, link_str_df, **network_map_kw)
+                axis.set_title(dt.strftime('%Y %b'))
             else:
                 for m in MONTHS:
                     dt = datetime(y, m, 1)
                     if dt < start_dt or dt > end_dt:
                         continue
                     links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
-                        f'_{dt.strftime("%Y_%m")}.{args.fmt}')
+                        f'_{dt.strftime("%Y_%m")}')
+                    link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
                     axis = next(axes)
-                    network_map(axis, links_file, dt.strftime('%Y %b'))
+                    network_map(axis, link_str_df, **network_map_kw)
             figure_title = f'networks_{args.link_str_file_tag}_{graph_file_tag}'
             figure_title += f'_m{start_dt.strftime("%m_%Y")}_{end_dt.strftime("%Y")}.png' \
                 if args.month else \

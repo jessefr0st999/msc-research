@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 
-from helpers import *
+from helpers import read_link_str_df, link_str_to_adjacency
 
 YEARS = list(range(2000, 2022 + 1))
 MONTHS = list(range(1, 13))
@@ -33,6 +33,43 @@ WHOLE_GRAPH_METRICS = [
     'transitivity',
 ]
 
+def average_degree(graph: nx.Graph):
+    return 2 * len(graph.edges) / len(graph.nodes)
+
+# TODO: Make this faster
+def shortest_path_and_eccentricity(graph: nx.Graph):
+    shortest_path_lengths = nx.shortest_path_length(graph)
+    ecc_by_node = {}
+    average_spl_by_node = {}
+    for source_node, target_nodes in shortest_path_lengths:
+        ecc_by_node[source_node] = np.max(list(target_nodes.values()))
+        for point, spl in target_nodes.items():
+            if spl == 0:
+                target_nodes[point] = len(graph.nodes)
+        average_spl_by_node[source_node] = np.average(list(target_nodes.values()))
+    return average_spl_by_node, ecc_by_node
+
+def partitions(graph: nx.Graph):
+    lcc_graph = graph.subgraph(max(nx.connected_components(graph), key=len)).copy()
+    return {
+        'louvain': [p for p in \
+             nx.algorithms.community.louvain_communities(lcc_graph)],
+        'greedy_modularity': [p for p in \
+            nx.algorithms.community.greedy_modularity_communities(lcc_graph)],
+        'asyn_lpa': [p for p in \
+            nx.algorithms.community.asyn_lpa_communities(lcc_graph, seed=0)],
+        # This one causes the script to hang for an ~1000 edge graph
+        # 'girvan_newman': [p for p in \
+        #     nx.algorithms.community.girvan_newman(lcc_graph)],
+    }
+
+def modularity(graph: nx.Graph, communities):
+    return nx.algorithms.community.modularity(graph, communities=communities)
+
+# TODO: implement
+def global_average_link_distance(graph: nx.Graph):
+    return None
+
 def create_graph(adjacency: pd.DataFrame):
     graph = nx.from_numpy_array(adjacency.values)
     graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
@@ -44,18 +81,21 @@ def main():
     parser.add_argument('--edge_density', type=float, default=0.005)
     parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--month', type=int, default=None)
+    parser.add_argument('--data_dir', default='data/precipitation')
+    parser.add_argument('--fmt', default='csv')
+    parser.add_argument('--plot_world', action='store_true', default=False)
     parser.add_argument('--link_str_file_tag', default='corr_alm_60_lag_0')
     args = parser.parse_args()
 
-    prec_df = pd.read_csv(DATA_FILE)
-    prec_df.columns = pd.to_datetime(prec_df.columns, format='D%Y.%m')
+    df = pd.read_csv(DATA_FILE)
+    df.columns = pd.to_datetime(df.columns, format='D%Y.%m')
     locations_df = pd.read_csv(LOCATIONS_FILE).set_index(['Lat', 'Lon'])
     whole_graph_metrics_df = pd.DataFrame(np.nan, columns=WHOLE_GRAPH_METRICS,
         index=DECADE_END_DATES if 'decadal' in args.link_str_file_tag \
-            else prec_df.columns)
+            else df.columns)
     create_empty_df = lambda: pd.DataFrame(np.nan, columns=locations_df.index,
         index=DECADE_END_DATES if 'decadal' in args.link_str_file_tag \
-            else prec_df.columns)
+            else df.columns)
     coreness_df = create_empty_df()
     degree_df = create_empty_df()
     eccentricity_df = create_empty_df()
@@ -71,17 +111,8 @@ def main():
             return
         date_summary = f'{dt.year}, {dt.strftime("%b")}'
         print(f'{date_summary}: reading link strength data from CSV file {links_file}')
-
-        adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
-        if args.edge_density:
-            threshold = np.quantile(link_str_df, 1 - args.edge_density)
-            print(f'{date_summary}: fixed edge density {args.edge_density} gives threshold {threshold}')
-        else:
-            threshold = args.link_str_threshold
-        adjacency[link_str_df >= threshold] = 1
-        if not args.edge_density:
-            _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
-            print(f'{date_summary}: fixed threshold {args.link_str_threshold} gives edge density {_edge_density}')
+        adjacency = link_str_to_adjacency(link_str_df, args.edge_density,
+            args.link_str_threshold)
         graph = create_graph(adjacency)
 
         start = datetime.now()

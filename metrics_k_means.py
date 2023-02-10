@@ -69,10 +69,11 @@ def main():
         d2 = np.array(df.iloc[DECADE_INDICES[1], :].dropna()).T
         figure, axes = plt.subplots(2, 3, layout='compressed')
         axes = iter(axes.flatten())
+        # TODO: recalculate lons/lats
         for k in k_list:
             labels_d1, sil_d1 = kmeans_fit(k, d1)
             axis = next(axes)
-            plot_clusters(d1, labels_d1, axis, dot_size=dot_size)
+            plot_clusters(d1, labels_d1, axis, lons, lats, dot_size=dot_size)
             axis.set_title(f'Decade 1 {metric_name}, {k} clusters, sil score {round(sil_d1, 4)}')
         show_or_save(figure, f'kmeans_{metric_name}_decade_1.png')
         figure, axes = plt.subplots(2, 3, layout='compressed')
@@ -80,7 +81,7 @@ def main():
         for k in k_list:
             labels_d2, sil_d2 = kmeans_fit(k, d2)
             axis = next(axes)
-            plot_clusters(d2, labels_d2, axis, dot_size=dot_size)
+            plot_clusters(d2, labels_d2, axis, lons, lats, dot_size=dot_size)
             axis.set_title(f'Decade 2 {metric_name}, {k} clusters, sil score {round(sil_d2, 4)}')
         show_or_save(figure, f'kmeans_{metric_name}_decade_2.png')
 

@@ -1,13 +1,14 @@
 import argparse
 import pickle
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 import numpy as np
 from scipy.signal import hilbert
 import matplotlib.pyplot as plt
 
-from helpers import configure_plots, get_map, scatter_map
+from helpers import configure_plots, get_map, scatter_map, prepare_df
 
 # TODO: check/verify this
 def complex_pca(X):
@@ -20,24 +21,19 @@ def complex_pca(X):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output_folder', default=None)
-    parser.add_argument('--dataset', default='prec')
+    parser.add_argument('--data_dir', default='data/precipitation')
+    parser.add_argument('--data_file', default='FusedData.csv')
     parser.add_argument('--pcs_to_plot', type=int, default=4)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
-    if args.dataset == 'sst':
-        df = pd.read_pickle('data/sst/sst_df_2021_01_2022_03_agg_lat_12_lon_16.pkl')
-        df -= 273.15
-    else: # prec
-        raw_df = pd.read_csv('data/precipitation/FusedData.csv')
-        raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')
-        locations_df = pd.read_csv('data/precipitation/Fused.Locations.csv')
-        df = pd.concat([locations_df, raw_df], axis=1)
-        df = df.set_index(['Lat', 'Lon']).T
-    df_complex = df.apply(hilbert, axis=0)
+    dataset = 'prec' if args.data_file == 'FusedData.csv' else args.data_file.split('_')[0]
+    df, lats, lons = prepare_df(args.data_dir, args.data_file, dataset)
+    plot_aus = True if dataset == 'prec' else False
 
-    vars_file_name = f'data/cpca/{args.dataset}_cpca_vars.pkl'
-    pcs_file_name = f'data/cpca/{args.dataset}_cpca_pcs.pkl'
+    df_complex = df.apply(hilbert, axis=0)
+    vars_file_name = f'data/cpca/{dataset}_cpca_vars.pkl'
+    pcs_file_name = f'data/cpca/{dataset}_cpca_pcs.pkl'
     if Path(vars_file_name).is_file() and Path(pcs_file_name).is_file():
         with open(vars_file_name, 'rb') as f:
             vars = pickle.load(f)
@@ -58,7 +54,7 @@ def main():
     axes[0].set_title('PC2 to PC10 explained variance proportion')
     axes[1].plot(list(range(1, len(prop_vars) + 1)), np.log10(prop_vars))
     axes[1].set_title('Log explained variance proportion')
-    show_or_save(figure, f'complex_pca_explained_var.png')
+    show_or_save(figure, f'{dataset}_complex_pca_explained_var.png')
 
     pcs_spatial_phase = np.angle(pcs)
     pcs_spatial_amp = np.abs(pcs)
@@ -66,7 +62,6 @@ def main():
     pcs_time_phase = np.angle(pcs_time)
     pcs_time_amp = np.abs(pcs_time)
     
-    plot_aus = False if args.dataset == 'sst' else True
     lats, lons = zip(*df.columns)
     for i in range(args.pcs_to_plot):
         if i % 2 == 0:
@@ -92,7 +87,9 @@ def main():
         axis.plot(pcs_time_amp[:, i])
         axis.set_title(f'PC{i + 1} ({percent_var}%) temporal amplitude')
         if i % 2 == 1:
-            show_or_save(figure, f'complex_pc_{i}_pc_{i + 1}.png')
+            show_or_save(figure, f'{dataset}_complex_pc_{i}_pc_{i + 1}.png')
 
 if __name__ == '__main__':
+    start = datetime.now()
     main()
+    print(f'Total time elapsed: {datetime.now() - start}')

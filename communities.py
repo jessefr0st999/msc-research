@@ -7,16 +7,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from networkx.algorithms import community
 
-from helpers import read_link_str_df, configure_plots, get_map
+from helpers import read_link_str_df, configure_plots, get_map, link_str_to_adjacency
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seq_file', default='seq_alm_60_lag_0.pkl')
-    parser.add_argument('--link_str_file', default='link_str_alm_60_lag_0_2022_03.csv')
+    parser.add_argument('--link_str_file', default='link_str_corr_alm_60_lag_0_2022_03.csv')
     parser.add_argument('--data_dir', default='data/precipitation')
     parser.add_argument('--output_folder', default=None)
     parser.add_argument('--plot_world', action='store_true', default=False)
     parser.add_argument('--edge_density', type=float, default=0.005)
+    parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--num_af_communities', type=int, default=10)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
@@ -41,10 +42,8 @@ def main():
     # TODO: make all seq dfs pd.Series rather than pd.Dataframe
     if isinstance(dt_seq_df, pd.Series):
         dt_seq_df = dt_seq_df.reset_index()
-    threshold = np.quantile(link_str_df, 1 - args.edge_density)
-    print(f'Fixed edge density {args.edge_density} gives threshold {threshold}')
-    adjacency = pd.DataFrame(0, columns=link_str_df.columns, index=link_str_df.index)
-    adjacency[link_str_df >= threshold] = 1
+    adjacency = link_str_to_adjacency(link_str_df, args.edge_density,
+        args.link_str_threshold)
     graph = nx.from_numpy_array(adjacency.values)
     graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
 

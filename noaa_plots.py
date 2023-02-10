@@ -31,7 +31,8 @@ def main():
     _map = get_map(axis, aus=False)
     mx, my = _map(lons, lats)
     dt = dt_range[-1]
-    scatter_map(axis, mx, my, networks_df.loc[dt, :], cmap='RdYlBu_r')
+    scatter_map(axis, mx, my, networks_df.loc[dt, :], cmap='RdYlBu_r',
+        size_func=lambda x: 200 if args.output_folder else 50)
     axis.set_title(dt.strftime("%b %Y"))
     show_or_save(figure, f'{dataset}_world_{dt.strftime("%Y_%m")}.png')
     
@@ -53,7 +54,8 @@ def main():
         _map = get_map(axis)
         mx, my = _map(lons, lats)
         scatter_map(axis, mx, my, aus_df.loc[dt, :], cb_min=df_min,
-            cb_max=df_max, cb_fs=label_size, cmap='RdYlBu_r')
+            cb_max=df_max, cb_fs=label_size, cmap='RdYlBu_r',
+            size_func=lambda x: 500 if args.output_folder else 50)
         axis.set_title(dt.strftime("%b %Y"))
     show_or_save(figure, f'{dataset}_aus_{dt_range[0].strftime("%Y_%m")}'
         f'_{dt_range[-1].strftime("%Y_%m")}.png')

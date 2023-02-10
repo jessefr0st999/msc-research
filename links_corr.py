@@ -47,17 +47,17 @@ def main():
     if not args.decadal:
         base_file += f'_lag_{args.lag_months}'
 
-    prec_seq_file = f'{DATA_DIR}/prec_seq{base_file}.pkl'
+    prec_seq_file = f'{DATA_DIR}/seq_prec{base_file}.pkl'
     months = [args.month] if args.month else list(range(1, 13))
 
     ## Helper functions
-
     def deseasonalise(df):
         def row_func(row: pd.Series):
             datetime_index = pd.DatetimeIndex(row.index)
             for m in months:
                 month_series = row.loc[datetime_index.month == m]
-                row.loc[datetime_index.month == m] = (month_series.values - month_series.mean()) / month_series.std()
+                row.loc[datetime_index.month == m] = \
+                    (month_series.values - month_series.mean()) / month_series.std()
             return row
         return df.apply(row_func, axis=1)
 
@@ -76,12 +76,13 @@ def main():
         return (df.max(axis=1) - df.mean(axis=1)) / df.std(axis=1)
 
     def build_link_str_df(df: pd.DataFrame):
-        tuple_df_key_kwargs = dict(index=[df['lat'], df['lon']],
+        # TODO: rework this as per NOAA-prec script
+        link_str_df_kwargs = dict(index=[df['lat'], df['lon']],
             columns=[df['lat'], df['lon']])
-        str_df_key_kwargs = dict(index=[f'{r["lat"]}_{r["lon"]}_1' for i, r in df.iterrows()],
+        slice_str_df_kwargs = dict(index=[f'{r["lat"]}_{r["lon"]}_1' for i, r in df.iterrows()],
             columns=[f'{r["lat"]}_{r["lon"]}_2' for i, r in df.iterrows()])
         if args.lag_months:
-            link_str_df = pd.DataFrame(pd.DataFrame(**str_df_key_kwargs).unstack())
+            link_str_df = pd.DataFrame(pd.DataFrame(**slice_str_df_kwargs).unstack())
             n = len(df.index)
             for i, lag in enumerate(range(-1, -1 - args.lag_months, -1)):
                 unlagged = [list(l[args.lag_months :]) for l in np.array(df['prec_seq'])]
@@ -97,20 +98,20 @@ def main():
                 # Get the correlations between the unlagged series at both locations
                 if i == 0:
                     loc_1_unlag_loc_2_unlag_slice = cov_mat[0 : n, 0 : n]
-                    slice_df = pd.DataFrame(loc_1_unlag_loc_2_unlag_slice, **str_df_key_kwargs).unstack()
+                    slice_df = pd.DataFrame(loc_1_unlag_loc_2_unlag_slice, **slice_str_df_kwargs).unstack()
                     link_str_df['s1_lag_0_s2_lag_0'] = slice_df
                 # Between lagged series at location 1 and unlagged series at location 2
                 loc_1_lag_loc_2_unlag_slice = cov_mat[n : 2 * n, 0 : n]
-                slice_df = pd.DataFrame(loc_1_lag_loc_2_unlag_slice, **str_df_key_kwargs).unstack()
+                slice_df = pd.DataFrame(loc_1_lag_loc_2_unlag_slice, **slice_str_df_kwargs).unstack()
                 link_str_df[f's1_lag_{-lag}_s2_lag_0'] = slice_df
                 # Between unlagged series at location 1 and lagged series at location 2
                 loc_1_unlag_loc_2_lag_slice = cov_mat[0 : n, n : 2 * n]
-                slice_df = pd.DataFrame(loc_1_unlag_loc_2_lag_slice, **str_df_key_kwargs).unstack()
+                slice_df = pd.DataFrame(loc_1_unlag_loc_2_lag_slice, **slice_str_df_kwargs).unstack()
                 link_str_df[f's1_lag_0_s2_lag_{-lag}'] = slice_df
             link_str_df = link_str_df.drop(columns=[0])
             link_str_df = calculate_link_str(link_str_df, LINK_STR_METHOD)
             link_str_df = link_str_df.unstack()
-            link_str_df = pd.DataFrame(np.array(link_str_df), **tuple_df_key_kwargs)
+            link_str_df = pd.DataFrame(np.array(link_str_df), **link_str_df_kwargs)
         else:
             unlagged = [list(l) for l in np.array(df['prec_seq'])]
             if args.no_anti_corr:
@@ -119,7 +120,7 @@ def main():
             else:
                 cov_mat = np.abs(np.corrcoef(unlagged))
             np.fill_diagonal(cov_mat, 0)
-            link_str_df = pd.DataFrame(cov_mat, **tuple_df_key_kwargs)
+            link_str_df = pd.DataFrame(cov_mat, **link_str_df_kwargs)
         # TODO: reimplement link_str_geo_penalty between pairs of points
         return link_str_df
 
