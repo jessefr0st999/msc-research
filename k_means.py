@@ -96,7 +96,7 @@ def main():
 
     dataset = 'prec' if args.data_file == 'FusedData.csv' else args.data_file.split('_')[0]
     df, lats, lons = prepare_df(args.data_dir, args.data_file, dataset)
-    plot_aus = True if dataset == 'prec' else False
+    map_region = 'aus' if dataset == 'prec' else 'world'
 
     # First, calculate and print silhouette scores for k = 2, ..., 12
     k_list = list(range(2, 12 + 1))
@@ -160,7 +160,7 @@ def main():
             labels_d1, sil_d1 = kmeans_fit(k, d1, args.constrain)
             axis = next(axes)
             plot_clusters(d1, labels_d1, axis, lons, lats, dot_size=dot_size,
-                aus=plot_aus)
+                region=map_region)
             axis.set_title(f'Decade 1, {k} clusters, sil score {round(sil_d1, 4)}')
         show_or_save(figure, f'{fig_name_base}_decade_1.png')
         figure, axes = plt.subplots(2, 3, layout='compressed')
@@ -169,7 +169,7 @@ def main():
             labels_d2, sil_d2 = kmeans_fit(k, d2, args.constrain)
             axis = next(axes)
             plot_clusters(d2, labels_d2, axis, lons, lats, dot_size=dot_size,
-                aus=plot_aus)
+                region=map_region)
             axis.set_title(f'Decade 2, {k} clusters, sil score {round(sil_d2, 4)}')
         show_or_save(figure, f'{fig_name_base}_decade_2.png')
     elif args.monthly:
@@ -184,7 +184,7 @@ def main():
                 labels_d1, sil_d1 = kmeans_fit(k, d1_m, args.constrain)
                 axis = next(axes)
                 plot_clusters(d1_m, labels_d1, axis, lons, lats, dot_size=dot_size,
-                    aus=plot_aus)
+                    region=map_region)
                 axis.set_title(f'Decade 1 {_dt.strftime("%b")}, {k} clusters, sil score {round(sil_d1, 4)}')
             show_or_save(figure, f'{fig_name_base}_m{_dt.strftime("%m")}_decade_1.png')
             d2_m = np.array(d2.loc[[dt.month == m for dt in d2.index], :]).T
@@ -194,7 +194,7 @@ def main():
                 labels_d2, sil_d2 = kmeans_fit(k, d2_m, args.constrain)
                 axis = next(axes)
                 plot_clusters(d2_m, labels_d2, axis, lons, lats, dot_size=dot_size,
-                    aus=plot_aus)
+                    region=map_region)
                 axis.set_title(f'Decade 2 {_dt.strftime("%b")}, {k} clusters, sil score {round(sil_d2, 4)}')
             show_or_save(figure, f'{fig_name_base}_m{_dt.strftime("%m")}_decade_2.png')
     else:
@@ -207,7 +207,7 @@ def main():
                 labels, sil = kmeans_fit(k, dt, args.constrain)
                 axis = next(axes)
                 plot_clusters(dt, labels, axis, lons, lats, dot_size=dot_size,
-                    aus=plot_aus)
+                    region=map_region)
                 axis.set_title(f'{_dt.strftime("%b %Y")} {k} clusters, sil score {round(sil, 4)}')
             show_or_save(figure, f'{fig_name_base}_{_dt.strftime("%Y_%m")}.png')
 

@@ -5,7 +5,7 @@ import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
 
-from helpers import configure_plots, read_link_str_df
+from helpers import configure_plots, read_link_str_df, file_region_type
 from plot_networks import network_map
 
 YEARS = list(range(2000, 2022 + 1))
@@ -24,7 +24,6 @@ def main():
     parser.add_argument('--edge_density', type=float, default=0.005)
     parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--data_dir', default='data/precipitation')
-    parser.add_argument('--plot_world', action='store_true', default=False)
     parser.add_argument('--link_str_file', default='link_str_corr_alm_60_lag_0_2022_03')
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
@@ -34,7 +33,7 @@ def main():
     lag_span = range(max_lag_df.min().min(), max_lag_df.max().max() + 1)
 
     network_map_kw = {
-        'plot_world': args.plot_world,
+        'map_region': file_region_type(args.link_str_file_tag),
         'edge_density': args.edge_density,
         'threshold': args.link_str_threshold,
     }

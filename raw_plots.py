@@ -29,7 +29,7 @@ def main():
 
     dataset = 'prec' if args.data_file == 'FusedData.csv' else args.data_file.split('_')[0]
     df, lats, lons = prepare_df(args.data_dir, args.data_file, dataset)
-    plot_aus = True if dataset == 'prec' else False
+    map_region = 'aus' if dataset == 'prec' else 'world'
 
     # Plot for each month in the last year of available data
     mx, my = None, None
@@ -51,7 +51,7 @@ def main():
         if dt < start_dt or dt > end_dt:
             continue
         axis = next(axes)
-        _map = get_map(axis, aus=plot_aus)
+        _map = get_map(axis, region=map_region)
         if mx is None:
             mx, my = _map(lons, lats)
         dt_values = df.iloc[i].values
@@ -107,23 +107,23 @@ def main():
     figure, axes = plt.subplots(2, 2, layout='compressed')
     axes = iter(axes.flatten())
     axis = next(axes)
-    mean_map = get_map(axis, aus=plot_aus)
+    mean_map = get_map(axis, region=map_region)
     mx, my = mean_map(lons, lats)
     scatterplot(axis, mx, my, loc_mean, cb_fs=label_size)
     axis.set_title('mean')
 
     axis = next(axes)
-    _ = get_map(axis, aus=plot_aus)
+    _ = get_map(axis, region=map_region)
     scatterplot(axis, mx, my, loc_std, cb_fs=label_size)
     axis.set_title('standard deviation')
 
     axis = next(axes)
-    _ = get_map(axis, aus=plot_aus)
+    _ = get_map(axis, region=map_region)
     scatterplot(axis, mx, my, loc_median, cb_fs=label_size)
     axis.set_title('median')
 
     axis = next(axes)
-    _ = get_map(axis, aus=plot_aus)
+    _ = get_map(axis, region=map_region)
     scatterplot(axis, mx, my, loc_max, cb_fs=label_size)
     axis.set_title('maximum')
     show_or_save(figure, f'{dataset}_stats_by_location.png')

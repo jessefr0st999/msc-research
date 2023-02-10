@@ -60,7 +60,7 @@ def link_str_to_adjacency(link_str_df: pd.DataFrame, edge_density=None,
     if edge_density:
         threshold = np.quantile(link_str_df, 1 - edge_density)
         print(f'Fixed edge density {edge_density} gives threshold {threshold}')
-    _link_str_df = np.copy(link_str_df) if lag_bool_df is None \
+    _link_str_df = link_str_df.copy() if lag_bool_df is None \
         else link_str_df * lag_bool_df
     if not _link_str_df.index.equals(link_str_df.columns):
         n, m = link_str_df.shape
@@ -107,20 +107,29 @@ def configure_plots(args):
     return label_size, font_size, show_or_save
 
 
-def get_map(axis=None, aus=True):
+def get_map(axis=None, region='aus'):
+    # Default: world
     kwargs = dict(
         lat_ts=0,
         resolution='l',
         suppress_ticks=True,
         ax=axis,
     )
-    if aus:
+    if region == 'aus':
         kwargs |= dict(
             projection='merc',
             llcrnrlon=110,
             llcrnrlat=-45,
             urcrnrlon=155,
             urcrnrlat=-10,
+        )
+    elif region == 'aus_oceans':
+        kwargs |= dict(
+            projection='merc',
+            llcrnrlon=25,
+            llcrnrlat=-65,
+            urcrnrlon=180,
+            urcrnrlat=20,
         )
     _map = Basemap(**kwargs)
     _map.drawcountries(linewidth=1)
@@ -142,3 +151,13 @@ def scatter_map(axis, mx, my, series, cb_min=None, cb_max=None, cmap='inferno_r'
     if show_cb:
         plt.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis)\
             .ax.tick_params(labelsize=cb_fs)
+
+def file_region_type(file_name: str):
+    noaa_file_tags = ['slp', 'temp', 'humidity', 'omega', 'pw']
+    for tag in noaa_file_tags:
+        if tag in file_name:
+            if 'prec' in file_name:
+                return 'aus_oceans'
+            else:
+                return 'world'
+    return 'aus'

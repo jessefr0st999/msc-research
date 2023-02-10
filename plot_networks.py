@@ -7,7 +7,8 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 
-from helpers import get_map, configure_plots, read_link_str_df, link_str_to_adjacency
+from helpers import get_map, configure_plots, read_link_str_df, \
+    link_str_to_adjacency, file_region_type
 
 YEARS = list(range(2000, 2022 + 1))
 MONTHS = list(range(1, 13))
@@ -15,10 +16,10 @@ OUTPUTS_DIR = 'data/outputs'
 LOCATIONS_FILE = f'data/precipitation/Fused.Locations.csv'
 
 def network_map(axis, link_str_df, edge_density=None, threshold=None,
-        plot_world=False, lag_bool_df=None):
+        map_region='aus', lag_bool_df=None):
     adjacency = link_str_to_adjacency(link_str_df, edge_density,
         threshold, lag_bool_df)
-    _map = get_map(axis, aus=not plot_world)
+    _map = get_map(axis, region=map_region)
     lats, lons = zip(*adjacency.columns)
     map_x, map_y = _map(lons, lats)
     graph = nx.from_numpy_array(adjacency.values)
@@ -43,7 +44,6 @@ def main():
     parser.add_argument('--month', type=int, default=None)
     parser.add_argument('--data_dir', default='data/precipitation')
     parser.add_argument('--fmt', default='csv')
-    parser.add_argument('--plot_world', action='store_true', default=False)
     parser.add_argument('--last_dt', action='store_true', default=False)
     parser.add_argument('--link_str_file_tag', default='corr_alm_60_lag_0')
     args = parser.parse_args()
@@ -53,7 +53,7 @@ def main():
         if args.edge_density \
         else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
     network_map_kw = {
-        'plot_world': args.plot_world,
+        'map_region': file_region_type(args.link_str_file_tag),
         'edge_density': args.edge_density,
         'threshold': args.link_str_threshold,
     }

@@ -29,7 +29,7 @@ def main():
 
     dataset = 'prec' if args.data_file == 'FusedData.csv' else args.data_file.split('_')[0]
     df, lats, lons = prepare_df(args.data_dir, args.data_file, dataset)
-    plot_aus = True if dataset == 'prec' else False
+    map_region = 'aus' if dataset == 'prec' else 'world'
 
     df_complex = df.apply(hilbert, axis=0)
     vars_file_name = f'data/cpca/{dataset}_cpca_vars.pkl'
@@ -69,13 +69,13 @@ def main():
             axes = iter(axes.flatten())
         percent_var = np.round(100 * prop_vars[i], 2)
         axis = next(axes)
-        _map = get_map(axis, plot_aus)
+        _map = get_map(axis, region=map_region)
         mx, my = _map(lons, lats)
         scatter_map(axis, mx, my, pcs_spatial_phase[:, i], cb_fs=label_size, cmap='RdYlBu_r')
         axis.set_title(f'PC{i + 1} ({percent_var}%) spatial phase')
         
         axis = next(axes)
-        _map = get_map(axis, plot_aus)
+        _map = get_map(axis, region=map_region)
         scatter_map(axis, mx, my, pcs_spatial_amp[:, i], cb_fs=label_size, cmap='RdYlBu_r')
         axis.set_title(f'PC{i + 1} ({percent_var}%) spatial amplitude')
         

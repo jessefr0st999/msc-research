@@ -9,9 +9,6 @@ from helpers import read_link_str_df, link_str_to_adjacency
 
 YEARS = list(range(2000, 2022 + 1))
 MONTHS = list(range(1, 13))
-DATA_DIR = 'data/precipitation'
-DATA_FILE = f'{DATA_DIR}/FusedData.csv'
-LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
 
 DECADE_END_DATES = [datetime(2011, 4, 1), datetime(2022, 3, 1)]
 WHOLE_GRAPH_METRICS = [
@@ -37,6 +34,8 @@ def average_degree(graph: nx.Graph):
     return 2 * len(graph.edges) / len(graph.nodes)
 
 # TODO: Make this faster
+# TODO: Refactor; max length as default shortest path makes graphs
+# hard to interpret
 def shortest_path_and_eccentricity(graph: nx.Graph):
     shortest_path_lengths = nx.shortest_path_length(graph)
     ecc_by_node = {}
@@ -45,8 +44,9 @@ def shortest_path_and_eccentricity(graph: nx.Graph):
         ecc_by_node[source_node] = np.max(list(target_nodes.values()))
         for point, spl in target_nodes.items():
             if spl == 0:
-                target_nodes[point] = len(graph.nodes)
-        average_spl_by_node[source_node] = np.average(list(target_nodes.values()))
+                # target_nodes[point] = len(graph.nodes)
+                target_nodes[point] = np.nan
+        average_spl_by_node[source_node] = np.nanmean(list(target_nodes.values()))
     return average_spl_by_node, ecc_by_node
 
 def partitions(graph: nx.Graph):
@@ -82,20 +82,24 @@ def main():
     parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--month', type=int, default=None)
     parser.add_argument('--data_dir', default='data/precipitation')
-    parser.add_argument('--fmt', default='csv')
-    parser.add_argument('--plot_world', action='store_true', default=False)
     parser.add_argument('--link_str_file_tag', default='corr_alm_60_lag_0')
     args = parser.parse_args()
 
-    df = pd.read_csv(DATA_FILE)
-    df.columns = pd.to_datetime(df.columns, format='D%Y.%m')
-    locations_df = pd.read_csv(LOCATIONS_FILE).set_index(['Lat', 'Lon'])
-    whole_graph_metrics_df = pd.DataFrame(np.nan, columns=WHOLE_GRAPH_METRICS,
-        index=DECADE_END_DATES if 'decadal' in args.link_str_file_tag \
-            else df.columns)
-    create_empty_df = lambda: pd.DataFrame(np.nan, columns=locations_df.index,
-        index=DECADE_END_DATES if 'decadal' in args.link_str_file_tag \
-            else df.columns)
+    # First, read in one of the target link strength files to get the
+    # location and time indices for initialising the arrays of metrics
+    if 'decadal' in args.link_str_file_tag:
+        link_str_df = read_link_str_df(
+            f'{args.data_dir}/link_str_{args.link_str_file_tag}_d1.pkl')
+    elif args.month:
+        link_str_df = read_link_str_df(
+            f'{args.data_dir}/link_str_{args.link_str_file_tag}_m03_2022.pkl')
+    else:
+        link_str_df = read_link_str_df(
+            f'{args.data_dir}/link_str_{args.link_str_file_tag}_2022_03.pkl')
+    whole_graph_metrics_df = pd.DataFrame(columns=WHOLE_GRAPH_METRICS)
+    create_empty_df = lambda: pd.DataFrame(
+        columns=link_str_df.index if link_str_df.index.equals(link_str_df.columns)
+            else [*link_str_df.index.values, *link_str_df.columns.values])
     coreness_df = create_empty_df()
     degree_df = create_empty_df()
     eccentricity_df = create_empty_df()
@@ -104,13 +108,8 @@ def main():
     closeness_centrality_df = create_empty_df()
     eigenvector_centrality_df = create_empty_df()
 
-    def calculate_metrics(dt, links_file):
-        try:
-            link_str_df = read_link_str_df(links_file)
-        except FileNotFoundError:
-            return
+    def calculate_metrics(dt, link_str_df):
         date_summary = f'{dt.year}, {dt.strftime("%b")}'
-        print(f'{date_summary}: reading link strength data from CSV file {links_file}')
         adjacency = link_str_to_adjacency(link_str_df, args.edge_density,
             args.link_str_threshold)
         graph = create_graph(adjacency)
@@ -144,13 +143,14 @@ def main():
         whole_graph_metrics_df.loc[dt, 'louvain_modularity'] = modularity(lcc_graph,
             _partitions['louvain'])
         # Centrality
-        bc = nx.betweenness_centrality(graph)
+        bc = nx.betweenness_centrality(graph) # NOTE: can take a while
         betweenness_centrality_df.loc[dt] = bc
         whole_graph_metrics_df.loc[dt, 'average_betweenness_centrality'] = np.mean(list(bc.values()))
         cc = nx.closeness_centrality(graph)
         closeness_centrality_df.loc[dt] = cc
         whole_graph_metrics_df.loc[dt, 'average_closeness_centrality'] = np.mean(list(cc.values()))
         try:
+            # TODO: investigate why this often fails
             ec = nx.eigenvector_centrality(graph)
             eigenvector_centrality_df.loc[dt] = ec
             whole_graph_metrics_df.loc[dt, 'average_eigenvector_centrality'] = np.mean(list(ec.values()))
@@ -161,23 +161,31 @@ def main():
         print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
         
     if 'decadal' in args.link_str_file_tag:
-        links_file_d1 = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_d1.csv'
-        calculate_metrics(DECADE_END_DATES[0], links_file_d1)
-        links_file_d2 = f'{DATA_DIR}/link_str_{args.link_str_file_tag}_d2.csv'
-        calculate_metrics(DECADE_END_DATES[1], links_file_d2)
+        calculate_metrics(DECADE_END_DATES[0], read_link_str_df(
+            f'{args.data_dir}/link_str_{args.link_str_file_tag}_d1.pkl'))
+        calculate_metrics(DECADE_END_DATES[1], read_link_str_df(
+            f'{args.data_dir}/link_str_{args.link_str_file_tag}_d2.pkl'))
+    elif args.month:
+        for y in YEARS:
+            dt = datetime(y, args.month, 1)
+            links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
+                f'_m{dt.strftime("%m_%Y")}.pkl')
+            try:
+                link_str_df = read_link_str_df(links_file)
+            except FileNotFoundError:
+                continue
+            calculate_metrics(dt, link_str_df)
     else:
         for y in YEARS:
-            if args.month:
-                dt = datetime(y, args.month, 1)
-                links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
-                    f'_m{dt.strftime("%m_%Y")}.csv')
-                calculate_metrics(dt, links_file)
-            else:
-                for m in MONTHS:
-                    dt = datetime(y, m, 1)
-                    links_file = (f'{DATA_DIR}/link_str_{args.link_str_file_tag}'
-                        f'_{dt.strftime("%Y_%m")}.csv')
-                    calculate_metrics(dt, links_file)
+            for m in MONTHS:
+                dt = datetime(y, m, 1)
+                links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
+                    f'_{dt.strftime("%Y_%m")}.pkl')
+                try:
+                    link_str_df = read_link_str_df(links_file)
+                except FileNotFoundError:
+                    continue
+                calculate_metrics(dt, link_str_df)
 
     graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' \
         if args.edge_density \

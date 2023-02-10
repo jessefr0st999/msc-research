@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from helpers import configure_plots, get_map, scatter_map
+from helpers import configure_plots, get_map, scatter_map, file_region_type
 
 METRICS_DIR = 'data/metrics'
 
@@ -26,8 +26,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--metrics_file_base', default='metrics_corr_alm_60_lag_0_ed_0p005')
     parser.add_argument('--output_folder', default=None)
+    parser.add_argument('--last_dt', action='store_true', default=False)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
+    map_region = file_region_type(args.metrics_file_base)
 
     coreness_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_cor.pkl')
     degree_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_deg.pkl')
@@ -44,11 +46,13 @@ def main():
     for i, dt in enumerate(coreness_df.index.values):
         if coreness_df.loc[dt].isnull().all():
             continue
+        if args.last_dt and i < len(coreness_df.index) - 1:
+            continue
         figure, axes = plt.subplots(2, 3, layout='compressed')
         axes = iter(axes.flatten())
         for df, df_min, df_max, metric_name in zip(dfs, df_mins, df_maxes, metric_names):
             axis = next(axes)
-            _map = get_map(axis)
+            _map = get_map(axis, region=map_region)
             mx, my = _map(lons, lats)
             series = df.loc[dt]
             scatter_map(axis, mx, my, series, cb_min=df_min, cb_max=df_max, cb_fs=label_size,
@@ -56,7 +60,7 @@ def main():
             axis.set_title(f'{pd.to_datetime(dt).strftime("%b %Y")}: {metric_name}')
         label = f'd{i + 1}' if 'decadal' in args.metrics_file_base else \
             pd.to_datetime(dt).strftime("%Y_%m")
-        show_or_save(figure, f'metrics_map_{label}.png')
+        show_or_save(figure, f'{args.metrics_file_base}_{label}.png')
 
 if __name__ == '__main__':
     main()

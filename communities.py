@@ -7,7 +7,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from networkx.algorithms import community
 
-from helpers import read_link_str_df, configure_plots, get_map, link_str_to_adjacency
+from helpers import read_link_str_df, configure_plots, get_map, \
+    link_str_to_adjacency, file_region_type
 
 def main():
     parser = argparse.ArgumentParser()
@@ -15,13 +16,13 @@ def main():
     parser.add_argument('--link_str_file', default='link_str_corr_alm_60_lag_0_2022_03.csv')
     parser.add_argument('--data_dir', default='data/precipitation')
     parser.add_argument('--output_folder', default=None)
-    parser.add_argument('--plot_world', action='store_true', default=False)
     parser.add_argument('--edge_density', type=float, default=0.005)
     parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--num_af_communities', type=int, default=10)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
-
+    
+    map_region = file_region_type(args.link_str_file)
     seq_df = pd.read_pickle(f'{args.data_dir}/{args.seq_file}')
     link_str_df = read_link_str_df(f'{args.data_dir}/{args.link_str_file}')
     try:
@@ -38,10 +39,6 @@ def main():
         year = int(args.link_str_file.split('_')[-1][:4])
         month = int(args.link_str_file.split('_')[-2][-2:])
     dt = datetime(int(year), int(month), 1)
-    dt_seq_df = seq_df.loc[dt]
-    # TODO: make all seq dfs pd.Series rather than pd.Dataframe
-    if isinstance(dt_seq_df, pd.Series):
-        dt_seq_df = dt_seq_df.reset_index()
     adjacency = link_str_to_adjacency(link_str_df, args.edge_density,
         args.link_str_threshold)
     graph = nx.from_numpy_array(adjacency.values)
@@ -85,14 +82,15 @@ def main():
     axes[1].set_title(f'{dt.strftime("%b %Y")}: gm_partitions, {len(gm_partitions)} communities')
     axes[2].set_title(f'{dt.strftime("%b %Y")}: af_partitions, {args.num_af_communities} communities')
     axes[3].set_title(f'{dt.strftime("%b %Y")}: al_partitions, {len(al_partitions)} communities')
-    lv_map = get_map(axes[0], aus=not args.plot_world)
-    gm_map = get_map(axes[1], aus=not args.plot_world)
-    af_map = get_map(axes[2], aus=not args.plot_world)
-    al_map = get_map(axes[3], aus=not args.plot_world)
-    mx, my = lv_map(dt_seq_df['lon'], dt_seq_df['lat'])
+    lv_map = get_map(axes[0], region=map_region)
+    gm_map = get_map(axes[1], region=map_region)
+    af_map = get_map(axes[2], region=map_region)
+    al_map = get_map(axes[3], region=map_region)
+    lats, lons = zip(*adjacency.columns)
+    map_x, map_y = lv_map(lons, lats)
     pos = {}
     for i, elem in enumerate(adjacency.index):
-        pos[elem] = (mx[i], my[i])
+        pos[elem] = (map_x[i], map_y[i])
     for (axis, colours) in zip(axes, [lv_node_colours, gm_node_colours,
             af_node_colours, al_node_colours]):
         nx.draw_networkx_nodes(G=lcc_graph, pos=pos, nodelist=lcc_graph.nodes(),
