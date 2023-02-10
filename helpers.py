@@ -1,10 +1,86 @@
-import networkx as nx
+import pickle
+
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from networkx.algorithms import community
 from mpl_toolkits.basemap import Basemap
+
+def lat_lon_bounds(lat, lon, region='default'):
+    if region == 'aus':
+        # Indian and south Pacific oceans
+        global_lon_bounds = lon < -90 or lon > 30
+        global_lat_bounds = lat >= -60 and lat <= 25
+        red_sea_bounds = lat > 13 and lat < 30 and lon > 32 and lon < 44
+        gulf_of_mexico_bounds = lat > 18 and lat < 30 and lon > -100 and lon < -81
+        return global_lon_bounds and global_lat_bounds and \
+            not (red_sea_bounds or gulf_of_mexico_bounds)
+    if region == 'all':
+        return True
+    return lat >= -60 and lat <= 60
+
+def prepare_df(data_dir, data_file, dataset):
+    # TODO: pre-process precipitation as per other datasets
+    if dataset == 'prec':
+        raw_df = pd.read_csv(f'{data_dir}/{data_file}')
+        raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')
+        locations_df = pd.read_csv(f'{data_dir}/Fused.Locations.csv')
+        df = pd.concat([locations_df, raw_df], axis=1).set_index(['Lat', 'Lon']).T
+        lats = locations_df['Lat']
+        lons = locations_df['Lon']
+    else:
+        df = pd.read_pickle(f'{data_dir}/{data_file}')
+        df.index = pd.to_datetime(df.index, format='D%Y.%m')
+        columns_to_keep = set()
+        for lat, lon in df.columns:
+            # if lat_lon_bounds(lat, lon, 'aus'):
+            if lat_lon_bounds(lat, lon):
+                columns_to_keep.add((lat, lon))
+        # with open(f'ocean_locations_{dataset}.pkl', 'rb') as f:
+        #     ocean_locations = set(pickle.load(f))
+        # columns_to_keep &= ocean_locations
+        df = df[list(columns_to_keep)]
+        lats, lons = zip(*df.columns)
+    return df, lats, lons
+
+# TODO: replace this with above
+def prepare_indexed_df(raw_df, locations_df, month=None, new_index='date'):
+    raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')
+    df = pd.concat([locations_df, raw_df], axis=1)
+    df = df.set_index(['Lat', 'Lon'])
+    if month:
+        df = df.loc[:, [c.month == month for c in df.columns]]
+    df = df.stack().reset_index()
+    df = df.rename(columns={'level_2': 'date', 0: 'prec', 'Lat': 'lat', 'Lon': 'lon'})
+    df = df.set_index(new_index)
+    return df
+
+def link_str_to_adjacency(link_str_df: pd.DataFrame, edge_density=None,
+        threshold=None, lag_bool_df=None):
+    if edge_density:
+        threshold = np.quantile(link_str_df, 1 - edge_density)
+        print(f'Fixed edge density {edge_density} gives threshold {threshold}')
+    _link_str_df = np.copy(link_str_df) if lag_bool_df is None \
+        else link_str_df * lag_bool_df
+    if not _link_str_df.index.equals(link_str_df.columns):
+        n, m = link_str_df.shape
+        # Given link_str_df is n x m, rearrange it into a
+        # (n + m) x (n + m) matrix with blocks as below:
+        # [[ 0_n   LS  ]
+        #  [ LS^T  O_m ]]
+        link_str_array_square = np.concatenate((
+            np.concatenate((np.zeros((n, n)), _link_str_df), axis=1),
+            np.concatenate((_link_str_df.T, np.zeros((m, m))), axis=1),
+        ), axis=0)
+        _index = pd.MultiIndex.from_tuples([*_link_str_df.index.values,
+            *_link_str_df.columns.values], names=['lat', 'lon'])
+        _link_str_df = pd.DataFrame(link_str_array_square, index=_index, columns=_index)
+    adjacency = _link_str_df * 0
+    adjacency[_link_str_df >= threshold] = 1
+    if not edge_density and lag_bool_df is None:
+        _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
+        print(f'Fixed threshold {threshold} gives edge density {_edge_density}')
+    return adjacency
 
 def read_link_str_df(filename: str):
     if filename.endswith('pkl'):
@@ -66,47 +142,3 @@ def scatter_map(axis, mx, my, series, cb_min=None, cb_max=None, cmap='inferno_r'
     if show_cb:
         plt.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis)\
             .ax.tick_params(labelsize=cb_fs)
-
-def average_degree(graph: nx.Graph):
-    return 2 * len(graph.edges) / len(graph.nodes)
-
-# TODO: Make this faster
-def shortest_path_and_eccentricity(graph: nx.Graph):
-    shortest_path_lengths = nx.shortest_path_length(graph)
-    ecc_by_node = {}
-    average_spl_by_node = {}
-    for source_node, target_nodes in shortest_path_lengths:
-        ecc_by_node[source_node] = np.max(list(target_nodes.values()))
-        for point, spl in target_nodes.items():
-            if spl == 0:
-                target_nodes[point] = len(graph.nodes)
-        average_spl_by_node[source_node] = np.average(list(target_nodes.values()))
-    return average_spl_by_node, ecc_by_node
-
-def partitions(graph: nx.Graph):
-    lcc_graph = graph.subgraph(max(nx.connected_components(graph), key=len)).copy()
-    return {
-        'louvain': [p for p in community.louvain_communities(lcc_graph)],
-        'greedy_modularity': [p for p in community.greedy_modularity_communities(lcc_graph)],
-        'asyn_lpa': [p for p in community.asyn_lpa_communities(lcc_graph, seed=0)],
-        # This one causes the script to hang for an ~1000 edge graph
-        # 'girvan_newman': [p for p in community.girvan_newman(lcc_graph)],
-    }
-
-def modularity(graph: nx.Graph, communities):
-    return community.modularity(graph, communities=communities)
-
-# TODO: implement
-def global_average_link_distance(graph: nx.Graph):
-    return None
-
-def prepare_indexed_df(raw_df, locations_df, month=None, new_index='date'):
-    raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')
-    df = pd.concat([locations_df, raw_df], axis=1)
-    df = df.set_index(['Lat', 'Lon'])
-    if month:
-        df = df.loc[:, [c.month == month for c in df.columns]]
-    df = df.stack().reset_index()
-    df = df.rename(columns={'level_2': 'date', 0: 'prec', 'Lat': 'lat', 'Lon': 'lon'})
-    df = df.set_index(new_index)
-    return df
