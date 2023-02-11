@@ -2,9 +2,11 @@ import argparse
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from pathlib import Path
+from rioxarray.raster_array import RasterArray
 
 import pandas as pd
 import xarray as xr
+import numpy as np
 
 DATA_DIR = 'data/noaa'
 
@@ -55,10 +57,30 @@ def main():
         _ = multi_level(df, 'rhum', 'humidity')
         return
     elif args.dataset == 'temp':
-        df = df.reset_index().pivot_table(values='tmax', index=['time', 'level'],
-            columns=['lat', 'lon'])
-        df = df.droplevel('level')
+        # Resample temperature onto the locations for the other variables
+        temp_xarray = xr.open_dataset(f'{DATA_DIR}/{args.data_file}',
+            decode_times=False)
+        temp_xarray = temp_xarray.drop_vars('time_bnds')
+        temp_xarray['tmax'] = temp_xarray['tmax'].sel(level=2).drop('level')
+        temp_xarray = temp_xarray.drop_dims('level')
+        temp_xarray = temp_xarray.to_array()
+        pw_xarray = xr.open_dataset(f'{DATA_DIR}/pr_wtr.eatm.mon.mean.nc', decode_times=False)
+        temp_array_new = (pw_xarray.drop_vars('time_bnds').to_array()[0, :, :, :] * 0)\
+            .rename({'lat': 'y', 'lon': 'x'}).to_numpy()
+        for i, dt in enumerate(pw_xarray.coords['time']):
+            temp_xarray_slice = temp_xarray.sel(time=dt)
+            pw_xarray_slice = pw_xarray.sel(time=dt)
+            pw_xarray_slice.rio._crs = 'epsg:4326'
+            xr_base = RasterArray(temp_xarray_slice)
+            xr_base._crs = 'epsg:4326'
+            temp_array_new[i, :, :] = xr_base.reproject_match(pw_xarray_slice).to_numpy()
+            if i % 25 == 0:
+                print(f'{i} / {len(pw_xarray.coords["time"])}')
+        df = pw_xarray.to_dataframe().reset_index()\
+            .pivot_table(values='pr_wtr', index='time', columns=['lat', 'lon'])
         df.index = df.index.map(lambda dt: datetime(1800, 1, 1) + relativedelta(hours=int(dt)))
+        df = pd.DataFrame(np.flip(temp_array_new, axis=1).reshape(529, 10512),
+            index=df.index, columns=df.columns)
         df -= 273.15
     elif args.dataset == 'pw':
         df = df.reset_index().pivot_table(values='pr_wtr', index='time',
