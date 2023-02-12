@@ -2,15 +2,14 @@ from pathlib import Path
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import argparse
-import json
 import pickle
 
 import pandas as pd
 import numpy as np
-# from geopy.distance import geodesic
-from shapely.geometry import shape, Point, MultiPolygon
 
 from helpers import lat_lon_bounds
+# TODO: check this function works for this case
+from noaa_links_corr_mv import build_link_str_df_mv
 
 YEARS = list(range(2000, 2022 + 1))
 # LINK_STR_METHOD = None
@@ -69,7 +68,6 @@ def main():
     noaa_seq_file = f'{NOAA_DATA_DIR}/seq_{noaa_dataset}_{base_file}.pkl'
     months = [args.month] if args.month else list(range(1, 13))
 
-    ## Helper functions
     def deseasonalise(df):
         def row_func(row: pd.Series):
             datetime_index = pd.DatetimeIndex(row.index)
@@ -79,67 +77,6 @@ def main():
                     (month_series.values - month_series.mean()) / month_series.std()
             return row
         return df.apply(row_func, axis=1)
-
-    # TODO: save the distribution of the "winning" lags
-    def aggregate_lagged_corrs(array: np.array, method):
-        if method == 'max':
-            agg_func = lambda x: np.max(x)
-        else:
-            # Default: as in Ludescher 2014
-            agg_func = lambda x: (np.max(x) - np.mean(x)) / np.std(x)
-        return np.apply_along_axis(agg_func, 2, array), np.argmax(array, 2)
-
-    def build_link_str_df(noaa_series: pd.Series, prec_series: pd.Series):
-        # TODO: NOAA and prec dataframes/series in the same format, regardless of lag
-        if isinstance(prec_series, pd.DataFrame):
-            prec_series = pd.Series(
-                prec_series['prec_seq'].values,
-                index=pd.MultiIndex.from_tuples(
-                    list(zip(*[prec_series['lat'].values, prec_series['lon'].values])),
-                    names=['Lat', 'Lon']
-                ),
-            )
-        n = len(noaa_series)
-        m = len(prec_series)
-        if args.lag_months:
-            # TODO: check this with a test matrix
-            # link_str_array consists of 'sheets' of size m x n containing all pairs
-            # of (NOAA location, prec location). The third dimension contains, for
-            # a given location pair, the values for each lag
-            link_str_array = np.zeros((m, n, 1 + 2 * args.lag_months))
-            for i, lag in enumerate(range(-1, -1 - args.lag_months, -1)):
-                unlagged_noaa = [list(l[args.lag_months :]) for l in np.array(noaa_series)]
-                unlagged_prec = [list(l[args.lag_months :]) for l in np.array(prec_series)]
-                lagged_noaa = [list(l[lag + args.lag_months : lag]) for l in np.array(noaa_series)]
-                lagged_prec = [list(l[lag + args.lag_months : lag]) for l in np.array(prec_series)]
-                combined = [*unlagged_noaa, *lagged_noaa, *unlagged_prec, *lagged_prec]
-                cov_mat = np.abs(np.corrcoef(combined))
-                # Get the correlations between the unlagged series at both locations
-                if i == 0:
-                    link_str_array[:, :, args.lag_months] = cov_mat[2*n : 2*n + m, 0 : n]
-                # Positive: between lagged NOAA and unlagged prec (i.e. prec behind NOAA)
-                link_str_array[:, :, args.lag_months + i + 1] = cov_mat[2*n + m : 2*n + 2*m, 0 : n]
-                # Negative: between unlagged NOAA and lagged prec (i.e. prec ahead of NOAA)
-                link_str_array[:, :, args.lag_months - i - 1] = cov_mat[2*n : 2*n + m, n : 2*n]
-            link_str_array, link_str_max_lags = \
-                aggregate_lagged_corrs(link_str_array, LINK_STR_METHOD)
-            link_str_max_lags -= args.lag_months
-            link_str_max_lags = pd.DataFrame(link_str_max_lags.T, index=noaa_series.index,
-                columns=prec_series.index)
-        else:
-            # combined is a list of the NOAA followed by the prec sequences
-            combined = [list(l) for l in [
-                *np.array(noaa_series),
-                *np.array(prec_series),
-            ]]
-            # cov_mat is (n + m) x (n + m)
-            cov_mat = np.abs(np.corrcoef(combined))
-            # The target block is m x n
-            link_str_array = cov_mat[n : n + m, 0 : n]
-            link_str_max_lags = None
-        # Return n x m matrices
-        return pd.DataFrame(link_str_array.T, index=noaa_series.index,
-            columns=prec_series.index), link_str_max_lags
 
     def prepare_seq_df(noaa_df):
         if args.month:
@@ -196,12 +133,12 @@ def main():
         noaa_seq_df.to_pickle(noaa_seq_file)
 
     if args.decadal:
-        d1_link_str_df, d1_link_str_max_lags = build_link_str_df(
+        d1_link_str_df, d1_link_str_max_lags = build_link_str_df_mv(
             noaa_seq_df.loc[noaa_seq_df.index[0]],
-            prec_seq_df.loc[prec_seq_df.index[0]])
-        d2_link_str_df, d2_link_str_max_lags = build_link_str_df(
+            prec_seq_df.loc[prec_seq_df.index[0]], args.lag_months)
+        d2_link_str_df, d2_link_str_max_lags = build_link_str_df_mv(
             noaa_seq_df.loc[noaa_seq_df.index[1]],
-            prec_seq_df.loc[prec_seq_df.index[1]])
+            prec_seq_df.loc[prec_seq_df.index[1]], args.lag_months)
         d1_link_str_df_file = f'{BOTH_DATA_DIR}/link_str_corr_{base_links_file}_d1.pkl'
         d2_link_str_df_file = f'{BOTH_DATA_DIR}/link_str_corr_{base_links_file}_d2.pkl'
         d1_link_str_df.to_pickle(d1_link_str_df_file)
@@ -232,7 +169,7 @@ def main():
             date_summary = f'{dt.year}, {dt.strftime("%b")}'
             print(f'\n{date_summary}: calculating link strength data...')
             start = datetime.now()
-            link_str_df, link_str_max_lags = build_link_str_df(noaa_seq_dt, prec_seq_dt)
+            link_str_df, link_str_max_lags = build_link_str_df_mv(noaa_seq_dt, prec_seq_dt, args.lag_months)
             link_str_df.to_pickle(links_file)
             if link_str_max_lags is not None:
                 link_str_max_lags.to_pickle(links_max_lags)

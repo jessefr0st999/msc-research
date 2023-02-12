@@ -7,123 +7,68 @@ import gc
 import pandas as pd
 import numpy as np
 
+from links_corr import aggregate_lagged_corrs
+
 YEARS = list(range(2000, 2022 + 1))
 # LINK_STR_METHOD = None
 LINK_STR_METHOD = 'max'
 DATA_DIR = 'data/noaa'
 OCEANS_GEOJSON = 'oceans.geojson'
 
-def _aggregate_lagged_corrs(array: np.array, method):
-    if method == 'max':
-        agg_func = lambda x: np.max(x)
+def build_link_str_df_mv(series_1: pd.Series, series_2: pd.Series, lag_months):
+    # TODO: NOAA and prec dataframes/series in the same format, regardless of lag
+    for s in series_1, series_2:
+        if isinstance(s, pd.DataFrame):
+            s = pd.Series(
+                s['prec_seq'].values,
+                index=pd.MultiIndex.from_tuples(
+                    list(zip(*[s['lat'].values, s['lon'].values])),
+                    names=['Lat', 'Lon']
+                ),
+            )
+    n = len(series_1)
+    m = len(series_2)
+    if lag_months:
+        # link_str_array consists of 'sheets' of size m x n containing all pairs
+        # of (series 1 location, series 2 location). The third dimension contains, for
+        # a given location pair, the values for each lag
+        link_str_array = np.zeros((m, n, 1 + 2 * lag_months))
+        for i, lag in enumerate(range(-1, -1 - lag_months, -1)):
+            unlagged_noaa = [list(l[lag_months :]) for l in np.array(series_1)]
+            unlagged_prec = [list(l[lag_months :]) for l in np.array(series_2)]
+            lagged_noaa = [list(l[lag + lag_months : lag]) for l in np.array(series_1)]
+            lagged_prec = [list(l[lag + lag_months : lag]) for l in np.array(series_2)]
+            combined = [*unlagged_noaa, *lagged_noaa, *unlagged_prec, *lagged_prec]
+            # TODO: do this more efficiently
+            cov_mat = np.abs(np.corrcoef(combined))
+            # Get the correlations between the unlagged series at both locations
+            if i == 0:
+                link_str_array[:, :, lag_months] = cov_mat[2*n : 2*n + m, 0 : n]
+            # Positive: between lagged series 1 and unlagged series 2
+            # (i.e. series 2 behind series 1)
+            link_str_array[:, :, lag_months + i + 1] = cov_mat[2*n + m : 2*n + 2*m, 0 : n]
+            # Negative: between unlagged series 1 and lagged series 2
+            # (i.e. series 2 ahead of series 1)
+            link_str_array[:, :, lag_months - i - 1] = cov_mat[2*n : 2*n + m, n : 2*n]
+        link_str_array, link_str_max_lags = \
+            aggregate_lagged_corrs(link_str_array, LINK_STR_METHOD)
+        link_str_max_lags -= lag_months
+        link_str_max_lags = pd.DataFrame(link_str_max_lags.T, index=series_1.index,
+            columns=series_2.index)
     else:
-        # Default: as in Ludescher 2014
-        agg_func = lambda x: (np.max(x) - np.mean(x)) / np.std(x)
-    return np.apply_along_axis(agg_func, 3, array), np.argmax(array, 3)
-
-def build_link_str_df_mv(seq_files, lag_months, decadal=False):
-    num_combs = comb(len(seq_files), 2)
-    link_str_array = None
-    link_str_array_d1 = None
-    df1 = None
-    df2 = None
-    prev_f1 = None
-    prev_f2 = None
-    for i, (f1, f2) in enumerate(combinations(seq_files, 2)):
-        print(f1, f2)
-        # Below is important to free up memory for the next iteration
-        if f1 != prev_f1:
-            del df1
-        if f2 != prev_f2:
-            del df2
-        gc.collect()
-        if f1 != prev_f1:
-            df1: pd.DataFrame = pd.read_pickle(f'{DATA_DIR}/{f1}')
-        if f2 != prev_f2:
-            df2: pd.DataFrame = pd.read_pickle(f'{DATA_DIR}/{f2}')
-
-        # Initialise the link strength array on the first iteration
-        # Assumption is that all series have the same indices and columns
-        n = len(df1.columns)
-        if decadal:
-            if link_str_array_d1 is None:
-                link_str_array_d1 = np.zeros((n, n, num_combs, 1 + 2 * lag_months)) \
-                    if lag_months else np.zeros((n, n, num_combs))
-                link_str_array_d2 = np.zeros((n, n, num_combs, 1 + 2 * lag_months)) \
-                    if lag_months else np.zeros((n, n, num_combs))
-            s1_d1 = df1.iloc[0]
-            s1_d2 = df1.iloc[1]
-            s2_d1 = df2.iloc[0]
-            s2_d2 = df2.iloc[1]
-            if lag_months:
-                # link_str_array consists of 'sheets' of size n x n containing all pairs
-                # of (series 1, series 2). The third dimension indexes the series pair.
-                # The fourth dimension contains, for a given location pair, the values for each lag.
-                for lsa, s1, s2 in [
-                    (link_str_array_d1, s1_d1, s2_d1),
-                    (link_str_array_d2, s1_d2, s2_d2),
-                ]:
-                    for i, lag in enumerate(range(-1, -1 - lag_months, -1)):
-                        unlagged_s1 = [list(l[lag_months :]) for l in np.array(s1)]
-                        unlagged_s2 = [list(l[lag_months :]) for l in np.array(s2)]
-                        lagged_s1 = [list(l[lag + lag_months : lag]) for l in np.array(s1)]
-                        lagged_s2 = [list(l[lag + lag_months : lag]) for l in np.array(s2)]
-                        combined = [*unlagged_s1, *lagged_s1, *unlagged_s2, *lagged_s2]
-                        cov_mat = np.abs(np.corrcoef(combined))
-                        # Get the correlations between the unlagged series at both locations
-                        if i == 0:
-                            lsa[:, :, i, lag_months] = cov_mat[2*n : 3*n, 0 : n]
-                        # Positive: between lagged NOAA and unlagged prec (i.e. prec behind NOAA)
-                        lsa[:, :, i, lag_months + i + 1] = cov_mat[3*n : 4*n, 0 : n]
-                        # Negative: between unlagged NOAA and lagged prec (i.e. prec ahead of NOAA)
-                        lsa[:, :, i, lag_months - i - 1] = cov_mat[2*n : 3*n, n : 2*n]
-            else:
-                # combined is a list of the DF1 seq then DF2 seq
-                combined = [list(l) for l in [
-                    *np.array(s1_d1),
-                    *np.array(s1_d2),
-                ]]
-                # cov_mat is 2n * 2n
-                cov_mat = np.abs(np.corrcoef(combined))
-                link_str_array_d1[:, :, i] = cov_mat[n : 2*n, 0 : n]
-                
-                combined = [list(l) for l in [
-                    *np.array(s2_d1),
-                    *np.array(s2_d2),
-                ]]
-                cov_mat = np.abs(np.corrcoef(combined))
-                link_str_array_d2[:, :, i] = cov_mat[n : 2*n, 0 : n]
-        else:
-            pass
-            # TODO: create pickles for each dt in the first df1/df2 iteration
-            # and GC them at the end of the iteration, then take them off the
-            # shelf in succeeding iterations when required
-            # for dt in df1.index.values:
-            #     # TODO: aggregate over lags before datasets
-            #     if lag_months:
-            #         pass
-            #     else:
-            #         unlagged = [list(l) for l in np.array(series)]
-            #         cov_mat = np.abs(np.corrcoef(unlagged))
-            #         np.fill_diagonal(cov_mat, 0)
-            #         link_str_array = cov_mat
-        print(link_str_array_d1, link_str_array_d1.shape)
-        prev_f1 = f1
-        prev_f2 = f2
-    
-    if decadal:
-        if lag_months:
-            link_str_array_d1, _ = _aggregate_lagged_corrs(
-                link_str_array_d1, LINK_STR_METHOD)
-            link_str_array_d2, _ = _aggregate_lagged_corrs(
-                link_str_array_d2, LINK_STR_METHOD)
-        link_str_array_d1 = np.apply_along_axis(np.linalg.norm, 2, link_str_array_d1)
-        link_str_array_d2 = np.apply_along_axis(np.linalg.norm, 2, link_str_array_d2)
-        link_str_df_d1 = pd.DataFrame(link_str_array_d1, index=s1_d1.index,
-            columns=s1_d1.index)
-        link_str_df_d2 = pd.DataFrame(link_str_array_d2, index=s1_d1.index,
-            columns=s1_d1.index)
-        return link_str_df_d1, link_str_df_d2
+        # combined is a list of the series 1 followed by the series 2 sequences
+        combined = [list(l) for l in [
+            *np.array(series_1),
+            *np.array(series_2),
+        ]]
+        # cov_mat is (n + m) x (n + m)
+        cov_mat = np.abs(np.corrcoef(combined))
+        # The target block is m x n
+        link_str_array = cov_mat[n : n + m, 0 : n]
+        link_str_max_lags = None
+    # Return n x m matrices
+    return pd.DataFrame(link_str_array.T, index=series_1.index,
+        columns=series_2.index), link_str_max_lags
 
 def main():
     parser = argparse.ArgumentParser()
@@ -140,25 +85,68 @@ def main():
     parser.add_argument('--month', type=int, default=None) # TODO
     args = parser.parse_args()
 
-    # All data files should have the same base; TODO: verify this
-    base_file = '_'.join([f.split('_')[1] for f in args.seq_files])
-    base_file += '_' + '_'.join(args.seq_files[0].split('_')[2:]).split('.')[0]
-    base_links_file = f'{base_file}_lag_{args.lag_months}'
     # Attempting to read all DFs in memory at the same time causes the script to freeze
     # Hence, only read in two at a time and free the memory before reading others in
+    df1 = None
+    df2 = None
+    prev_f1 = None
+    prev_f2 = None
+    for i, (f1, f2) in enumerate(combinations(args.seq_files, 2)):
+        if f1 != prev_f1:
+            del df1
+        if f2 != prev_f2:
+            del df2
+        gc.collect()
+        if f1 != prev_f1:
+            df1: pd.DataFrame = pd.read_pickle(f'{DATA_DIR}/{f1}')
+        if f2 != prev_f2:
+            df2: pd.DataFrame = pd.read_pickle(f'{DATA_DIR}/{f2}')
+        base_file = '_'.join([f.split('_')[1] for f in [f1, f2]])
+        base_file += '_' + '_'.join(args.seq_files[0].split('_')[2:]).split('.')[0]
+        base_links_file = f'{base_file}_lag_{args.lag_months}'
 
-    if not args.non_decadal:
-        d1_link_str_df, d2_link_str_df = build_link_str_df_mv(
-            args.seq_files, args.lag_months, True)
-        d1_link_str_df_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d1.pkl'
-        d2_link_str_df_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d2.pkl'
-        d1_link_str_df.to_pickle(d1_link_str_df_file)
-        d2_link_str_df.to_pickle(d2_link_str_df_file)
-        print(f'Decadal link strengths calculated and saved to pickle files'
-            f' {d1_link_str_df_file} and {d2_link_str_df_file}')
-    else:
-        pass
-        # link_str_dfs = build_link_str_df_mv(args.seq_files, args.lag_months)
+        if not args.non_decadal:
+            d1_link_str_df, d1_link_str_max_lags = build_link_str_df_mv(
+                df1.loc[df1.index[0]], df2.loc[df2.index[0]], args.lag_months)
+            d2_link_str_df, d2_link_str_max_lags = build_link_str_df_mv(
+                df1.loc[df1.index[1]], df2.loc[df2.index[1]], args.lag_months)
+            d1_link_str_df_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d1.pkl'
+            d2_link_str_df_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d2.pkl'
+            d1_link_str_df.to_pickle(d1_link_str_df_file)
+            d2_link_str_df.to_pickle(d2_link_str_df_file)
+            d1_max_lags_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d1_max_lags.pkl'
+            d2_max_lags_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d2_max_lags.pkl'
+            if d1_link_str_max_lags is not None:
+                d1_link_str_max_lags.to_pickle(d1_max_lags_file)
+            if d2_link_str_max_lags is not None:
+                d2_link_str_max_lags.to_pickle(d2_max_lags_file)
+            print(f'Decadal link strengths calculated and saved to pickle files'
+                f' {d1_link_str_df_file} and {d2_link_str_df_file}')
+        else:
+            for dt in df1.index.values:
+                _dt = pd.to_datetime(dt)
+                try:
+                    df1_dt = df1.loc[dt]
+                    df2_dt = df2.loc[dt]
+                    # Skip unless the sequences based on the specified
+                    # lookback time are available
+                    if df1_dt.isnull().values.any() or df2_dt.isnull().values.any():
+                        continue
+                except KeyError:
+                    continue
+                links_file = (f'{DATA_DIR}/link_str_corr_{base_links_file}')
+                links_file += f'_{_dt.strftime("%Y")}' if args.month else f'_{_dt.strftime("%Y_%m")}'
+                links_max_lags = f'{links_file}_max_lags.pkl'
+                links_file += '.pkl'
+                date_summary = f'{_dt.year}, {_dt.strftime("%b")}'
+                print(f'\n{date_summary}: calculating link strength data...')
+                start = datetime.now()
+                link_str_df, link_str_max_lags = build_link_str_df_mv(df1_dt, df2_dt, args.lag_months)
+                link_str_df.to_pickle(links_file)
+                if link_str_max_lags is not None:
+                    link_str_max_lags.to_pickle(links_max_lags)
+                print((f'{date_summary}: link strengths calculated and saved to pickle file'
+                    f' {links_file}; time elapsed: {datetime.now() - start}'))
 
 if __name__ == '__main__':
     start = datetime.now()
