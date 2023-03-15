@@ -11,8 +11,10 @@ METRICS_DIR = 'data/metrics'
 metric_names = [
     'coreness',
     'degree',
+    'weighted_degree',
     'eccentricity',
     'shortest_path',
+    'local_link_distance',
     'betweenness_centrality',
     'closeness_centrality',
     # 'eigenvector_centrality',
@@ -22,10 +24,13 @@ def size_func(series):
     series_norm = series / np.max(series)
     return [50 * n for n in series_norm]
 
+# TODO: just specify a single datetime for this script, as per the communities
+# TODO: read metrics for each graph from a separate file once metrics.py is updated
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--metrics_file_base', default='metrics_corr_alm_60_lag_0_ed_0p005')
     parser.add_argument('--output_folder', default=None)
+    parser.add_argument('--yearly', action='store_true', default=False)
     parser.add_argument('--last_dt', action='store_true', default=False)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
@@ -33,14 +38,20 @@ def main():
 
     coreness_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_cor.pkl')
     degree_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_deg.pkl')
+    weighted_degree_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_wdeg.pkl')
     eccentricity_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_ecc.pkl')
     shortest_path_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_sp.pkl')
+    local_link_distance_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_lld.pkl')
     betweenness_centrality_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_b_cent.pkl')
     closeness_centrality_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_c_cent.pkl')
-    eigenvector_centrality_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_e_cent.pkl')
+    # eigenvector_centrality_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_e_cent.pkl')
     lats, lons = zip(*coreness_df.columns)
-    dfs = [coreness_df, degree_df, eccentricity_df, shortest_path_df,
+    dfs = [coreness_df, degree_df, weighted_degree_df, eccentricity_df,
+        shortest_path_df, local_link_distance_df,
         betweenness_centrality_df, closeness_centrality_df]
+    # dfs = [degree_df, weighted_degree_df,
+    #     shortest_path_df, local_link_distance_df,
+    #     betweenness_centrality_df, closeness_centrality_df]
     df_mins = [df.min().min() for df in dfs]
     df_maxes = [df.max().max() for df in dfs]
     for i, dt in enumerate(coreness_df.index.values):
@@ -48,7 +59,13 @@ def main():
             continue
         if args.last_dt and i < len(coreness_df.index) - 1:
             continue
-        figure, axes = plt.subplots(2, 3, layout='compressed')
+        if args.yearly:
+            _dt = pd.to_datetime(dt)
+            if _dt.month != 3:
+                continue
+            if _dt.year not in [2002, 2007, 2012, 2017, 2022]:
+                continue
+        figure, axes = plt.subplots(2, 4, layout='compressed')
         axes = iter(axes.flatten())
         for df, df_min, df_max, metric_name in zip(dfs, df_mins, df_maxes, metric_names):
             axis = next(axes)
@@ -58,8 +75,21 @@ def main():
             scatter_map(axis, mx, my, series, cb_min=df_min, cb_max=df_max, cb_fs=label_size,
                 size_func=lambda series: 100 if args.output_folder else 20)
             axis.set_title(f'{pd.to_datetime(dt).strftime("%b %Y")}: {metric_name}')
-        label = f'd{i + 1}' if 'decadal' in args.metrics_file_base else \
-            pd.to_datetime(dt).strftime("%Y_%m")
+        label = pd.to_datetime(dt).strftime("%Y_%m")
+        show_or_save(figure, f'{args.metrics_file_base}_{label}.png')
+    if 'decadal' in args.metrics_file_base:
+        d1_dt, d2_dt = coreness_df.index.values
+        figure, axes = plt.subplots(2, 4, layout='compressed')
+        axes = iter(axes.flatten())
+        for df, df_min, df_max, metric_name in zip(dfs, df_mins, df_maxes, metric_names):
+            axis = next(axes)
+            _map = get_map(axis, region=map_region)
+            mx, my = _map(lons, lats)
+            series_diff = df.loc[d2_dt] - df.loc[d1_dt]
+            scatter_map(axis, mx, my, series_diff, cb_fs=label_size, cmap='RdYlBu_r',
+                size_func=lambda series: 100 if args.output_folder else 20)
+            axis.set_title(f'{pd.to_datetime(dt).strftime("%b %Y")}: {metric_name}')
+        label = 'decadal_diff'
         show_or_save(figure, f'{args.metrics_file_base}_{label}.png')
 
 if __name__ == '__main__':
