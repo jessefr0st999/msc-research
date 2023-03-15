@@ -13,27 +13,24 @@ MONTHS = list(range(1, 13))
 OUTPUTS_DIR = 'data/outputs'
 LOCATIONS_FILE = f'data/precipitation/Fused.Locations.csv'
 
-def create_graph(adjacency: pd.DataFrame):
-    graph = nx.from_numpy_array(adjacency.values)
-    graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
-    return graph
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output_folder', default=None)
-    parser.add_argument('--edge_density', type=float, default=0.005)
+    parser.add_argument('--edge_density', '--ed', type=float, default=0.005)
     parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--data_dir', default='data/precipitation')
-    parser.add_argument('--link_str_file', default='link_str_corr_alm_60_lag_0_2022_03')
+    parser.add_argument('--link_str_file', default='link_str_corr_alm_60_lag_6_2022_03')
+    parser.add_argument('--fmt', default='csv')
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
-    link_str_df = read_link_str_df(f'{args.data_dir}/{args.link_str_file}.pkl')
+    link_str_df = read_link_str_df(f'{args.data_dir}/{args.link_str_file}.{args.fmt}')
     max_lag_df = read_link_str_df(f'{args.data_dir}/{args.link_str_file}_max_lags.pkl')
     lag_span = range(max_lag_df.min().min(), max_lag_df.max().max() + 1)
 
+    link_str_file_tag = args.link_str_file.split('link_str_')[1]
     network_map_kw = {
-        'map_region': file_region_type(args.link_str_file_tag),
+        'map_region': file_region_type(link_str_file_tag),
         'edge_density': args.edge_density,
         'threshold': args.link_str_threshold,
     }
@@ -46,7 +43,6 @@ def main():
         network_map(axis, link_str_df, **network_map_kw)
         axis.set_title(f'lag = {lag}')
 
-    link_str_file_tag = args.link_str_file.split('link_str_')[1]
     graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' \
         if args.edge_density \
         else f'thr_{str(args.link_str_threshold).replace(".", "p")}'

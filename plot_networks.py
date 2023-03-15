@@ -16,9 +16,9 @@ OUTPUTS_DIR = 'data/outputs'
 LOCATIONS_FILE = f'data/precipitation/Fused.Locations.csv'
 
 def network_map(axis, link_str_df, edge_density=None, threshold=None,
-        map_region='aus', lag_bool_df=None):
+        map_region='aus', lag_bool_df=None, col_quantile=False):
     adjacency = link_str_to_adjacency(link_str_df, edge_density,
-        threshold, lag_bool_df)
+        threshold, lag_bool_df, col_quantile)
     _map = get_map(axis, region=map_region)
     lats, lons = zip(*adjacency.columns)
     map_x, map_y = _map(lons, lats)
@@ -27,38 +27,43 @@ def network_map(axis, link_str_df, edge_density=None, threshold=None,
     pos = {}
     for i, elem in enumerate(adjacency.index):
         pos[elem] = (map_x[i], map_y[i])
-    node_sizes = [adjacency[location].sum() / 5 for location in graph.nodes()]
+    node_sizes = [25 if adjacency[location].sum() else 0 for location in graph.nodes()]
     # node_sizes = [3 for _ in graph.nodes()]
     nx.draw_networkx_nodes(ax=axis, G=graph, pos=pos, nodelist=graph.nodes(),
         node_color='r', alpha=0.8, node_size=node_sizes)
     nx.draw_networkx_edges(ax=axis, G=graph, pos=pos, edge_color='g',
-        alpha=0.2, arrows=False)
+        alpha=0.5, arrows=False)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output_folder', default=None)
-    parser.add_argument('--edge_density', type=float, default=0.005)
+    parser.add_argument('--edge_density', '--ed', type=float, default=0.005)
+    parser.add_argument('--col_quantile', type=float, default=None)
     parser.add_argument('--link_str_threshold', type=float, default=None)
     parser.add_argument('--start_year', type=int, default=2021)
     parser.add_argument('--start_month', type=int, default=4)
     parser.add_argument('--month', type=int, default=None)
     parser.add_argument('--data_dir', default='data/precipitation')
-    parser.add_argument('--fmt', default='csv')
     parser.add_argument('--last_dt', action='store_true', default=False)
+    parser.add_argument('--yearly', action='store_true', default=False)
     parser.add_argument('--link_str_file_tag', default='corr_alm_60_lag_0')
+    parser.add_argument('--fmt', default='csv')
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
     graph_file_tag = f'ed_{str(args.edge_density).replace(".", "p")}' \
         if args.edge_density \
         else f'thr_{str(args.link_str_threshold).replace(".", "p")}'
+    if args.col_quantile:
+        graph_file_tag += f'_cq_{str(args.col_quantile).replace(".", "p")}'
     network_map_kw = {
         'map_region': file_region_type(args.link_str_file_tag),
         'edge_density': args.edge_density,
         'threshold': args.link_str_threshold,
+        'col_quantile': args.col_quantile,
     }
     if 'decadal' in args.link_str_file_tag:
-        figure, axes = plt.subplots(2, 1, layout='compressed')
+        figure, axes = plt.subplots(1, 2, layout='compressed')
         axes = iter(axes.flatten())
 
         links_file = f'{args.data_dir}/link_str_{args.link_str_file_tag}_d1'
@@ -91,8 +96,8 @@ def main():
         figure, axes = plt.subplots(3, 4, layout='compressed')
         axes = iter(axes.flatten())
         start_dt = datetime(args.start_year, args.month or args.start_month, 1)
-        end_dt = start_dt + relativedelta(years=11) if args.month else \
-            start_dt + relativedelta(months=11)
+        end_dt = start_dt + relativedelta(years=11) if args.month or args.yearly \
+            else start_dt + relativedelta(months=11)
         for y in YEARS:
             if args.month:
                 dt = datetime(y, args.month, 1)
@@ -100,7 +105,10 @@ def main():
                     continue
                 links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
                     f'_m{dt.strftime("%m_%Y")}')
-                link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
+                try:
+                    link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
+                except FileNotFoundError:
+                    continue
                 axis = next(axes)
                 network_map(axis, link_str_df, **network_map_kw)
                 axis.set_title(dt.strftime('%Y %b'))
@@ -111,9 +119,14 @@ def main():
                         continue
                     links_file = (f'{args.data_dir}/link_str_{args.link_str_file_tag}'
                         f'_{dt.strftime("%Y_%m")}')
-                    link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
+                    try:
+                        link_str_df = read_link_str_df(f'{links_file}.{args.fmt}')
+                    except FileNotFoundError:
+                        continue
+                    print(links_file)
                     axis = next(axes)
                     network_map(axis, link_str_df, **network_map_kw)
+                    axis.set_title(dt.strftime('%Y %b'))
             figure_title = f'networks_{args.link_str_file_tag}_{graph_file_tag}'
             figure_title += f'_m{start_dt.strftime("%m_%Y")}_{end_dt.strftime("%Y")}.png' \
                 if args.month else \

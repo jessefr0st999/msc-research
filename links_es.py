@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--lookback_months', '--lm', type=int, default=None)
     # tau_max for ES, del_tau for ECA
     parser.add_argument('--tau', type=int, default=12)
-    parser.add_argument('--edge_density', type=float, default=0.005)
+    parser.add_argument('--edge_density', '--ed', type=float, default=0.005)
     parser.add_argument('--col_quantile', '--cq', type=float, default=0.95)
     parser.add_argument('--df_quantile', '--dq', type=float, default=0.95)
     parser.add_argument('--save_graph_folder', default=None)

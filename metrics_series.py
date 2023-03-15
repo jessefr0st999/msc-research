@@ -45,8 +45,9 @@ def main():
         axis.set_title(metric)
         if i % 4 == 3:
             show_or_save(figure, f'{args.metrics_file_base}_series_{fig_num}.png')
+    show_or_save(figure, f'{args.metrics_file_base}_series_{fig_num}.png')
 
-    figure, axes = plt.subplots(4, 4, layout='compressed')
+    figure, axes = plt.subplots(4, 5, layout='compressed')
     axes = iter(axes.flatten())
     for i, metric in enumerate(sorted(metrics_df.columns)):
         axis = next(axes)
@@ -54,4 +55,5 @@ def main():
         axis.set_title(metric)
     show_or_save(figure, f'{args.metrics_file_base}_series_all.png')
 
-main()
+if __name__ == '__main__':
+    main()
