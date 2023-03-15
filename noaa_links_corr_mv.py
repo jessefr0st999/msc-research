@@ -34,22 +34,25 @@ def build_link_str_df_mv(series_1: pd.Series, series_2: pd.Series, lag_months):
         # a given location pair, the values for each lag
         link_str_array = np.zeros((m, n, 1 + 2 * lag_months))
         for i, lag in enumerate(range(-1, -1 - lag_months, -1)):
-            unlagged_noaa = [list(l[lag_months :]) for l in np.array(series_1)]
-            unlagged_prec = [list(l[lag_months :]) for l in np.array(series_2)]
-            lagged_noaa = [list(l[lag + lag_months : lag]) for l in np.array(series_1)]
-            lagged_prec = [list(l[lag + lag_months : lag]) for l in np.array(series_2)]
-            combined = [*unlagged_noaa, *lagged_noaa, *unlagged_prec, *lagged_prec]
-            # TODO: do this more efficiently
-            cov_mat = np.abs(np.corrcoef(combined))
+            unlagged_s1 = [list(seq[lag_months :]) for seq in np.array(series_1)]
+            unlagged_s2 = [list(seq[lag_months :]) for seq in np.array(series_2)]
+            lagged_s1 = [list(seq[lag + lag_months : lag]) for seq in np.array(series_1)]
+            lagged_s2 = [list(seq[lag + lag_months : lag]) for seq in np.array(series_2)]
             # Get the correlations between the unlagged series at both locations
             if i == 0:
-                link_str_array[:, :, lag_months] = cov_mat[2*n : 2*n + m, 0 : n]
+                combined = [*unlagged_s1, *unlagged_s2]
+                cov_mat = np.abs(np.corrcoef(combined))
+                link_str_array[:, :, lag_months] = cov_mat[n : n + m, 0 : n]
             # Positive: between lagged series 1 and unlagged series 2
             # (i.e. series 2 behind series 1)
-            link_str_array[:, :, lag_months + i + 1] = cov_mat[2*n + m : 2*n + 2*m, 0 : n]
+            combined = [*lagged_s1, *unlagged_s2]
+            cov_mat = np.abs(np.corrcoef(combined))
+            link_str_array[:, :, lag_months + i + 1] = cov_mat[n : n + m, 0 : n]
             # Negative: between unlagged series 1 and lagged series 2
             # (i.e. series 2 ahead of series 1)
-            link_str_array[:, :, lag_months - i - 1] = cov_mat[2*n : 2*n + m, n : 2*n]
+            combined = [*unlagged_s1, *lagged_s2]
+            cov_mat = np.abs(np.corrcoef(combined))
+            link_str_array[:, :, lag_months - i - 1] = cov_mat[n : n + m, 0 : n]
         link_str_array, link_str_max_lags = \
             aggregate_lagged_corrs(link_str_array, LINK_STR_METHOD)
         link_str_max_lags -= lag_months
@@ -57,7 +60,7 @@ def build_link_str_df_mv(series_1: pd.Series, series_2: pd.Series, lag_months):
             columns=series_2.index)
     else:
         # combined is a list of the series 1 followed by the series 2 sequences
-        combined = [list(l) for l in [
+        combined = [list(seq) for seq in [
             *np.array(series_1),
             *np.array(series_2),
         ]]
@@ -73,11 +76,11 @@ def build_link_str_df_mv(series_1: pd.Series, series_2: pd.Series, lag_months):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seq_files', nargs='*', default=[
-        'seq_slp_decadal.pkl',
-        'seq_temp_decadal.pkl',
-        'seq_humidity_decadal.pkl',
-        'seq_omega_decadal.pkl',
-        'seq_pw_decadal.pkl',
+        'seq_slp_decadal_ocean.pkl',
+        'seq_temp_decadal_ocean.pkl',
+        'seq_humidity_decadal_ocean.pkl',
+        'seq_omega_decadal_ocean.pkl',
+        'seq_pw_decadal_ocean.pkl',
     ])
     # Args below should conform to those in the files above
     parser.add_argument('--lag_months', '--lag', type=int, default=0)

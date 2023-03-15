@@ -43,9 +43,9 @@ def main():
     noaa_dataset = args.noaa_data_file.split('_')[0]
     columns_to_keep = set()
     for lat, lon in noaa_df.columns:
-        if lat_lon_bounds(lat, lon, 'aus'):
+        if lat_lon_bounds(lat, lon, 'aus_oceans'):
             columns_to_keep.add((lat, lon))
-    with open(f'ocean_locations_{noaa_dataset}.pkl', 'rb') as f:
+    with open(f'ocean_locations_{noaa_dataset}_aus_oceans.pkl', 'rb') as f:
         ocean_locations = set(pickle.load(f))
     columns_to_keep &= ocean_locations
     noaa_df = noaa_df[list(columns_to_keep)]
@@ -169,7 +169,8 @@ def main():
             date_summary = f'{dt.year}, {dt.strftime("%b")}'
             print(f'\n{date_summary}: calculating link strength data...')
             start = datetime.now()
-            link_str_df, link_str_max_lags = build_link_str_df_mv(noaa_seq_dt, prec_seq_dt, args.lag_months)
+            link_str_df, link_str_max_lags = build_link_str_df_mv(noaa_seq_dt, prec_seq_dt,
+                args.lag_months)
             link_str_df.to_pickle(links_file)
             if link_str_max_lags is not None:
                 link_str_max_lags.to_pickle(links_max_lags)

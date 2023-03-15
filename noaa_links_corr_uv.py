@@ -9,6 +9,9 @@ import pandas as pd
 import numpy as np
 from shapely.geometry import shape, Point, MultiPolygon
 
+from links_corr import build_link_str_df_uv
+from helpers import lat_lon_bounds
+
 YEARS = list(range(2000, 2022 + 1))
 # LINK_STR_METHOD = None
 LINK_STR_METHOD = 'max'
@@ -22,44 +25,46 @@ def main():
     parser.add_argument('--avg_lookback_months', '--alm', type=int, default=60)
     parser.add_argument('--lag_months', '--lag', type=int, default=0)
     parser.add_argument('--deseasonalise', action='store_true', default=False)
-    parser.add_argument('--decadal', action='store_true', default=False) # TODO
+    parser.add_argument('--decadal', action='store_true', default=False)
     parser.add_argument('--geo_agg', action='store_true', default=False) # TODO
     parser.add_argument('--month', type=int, default=None) # TODO
+    parser.add_argument('--region', default='aus_oceans')
     parser.add_argument('--ocean_only', action='store_true', default=False)
     parser.add_argument('--land_only', action='store_true', default=False)
     args = parser.parse_args()
     
     df: pd.DataFrame = pd.read_pickle(f'{DATA_DIR}/{args.data_file}')
     dataset = args.data_file.split('_')[0]
-    # Remove columns above/below +/- 60 degrees latitude
-    columns_to_keep = []
+    columns_to_keep = set()
     for lat, lon in df.columns:
-        if lat >= -60 and lat <= 60:
-            columns_to_keep.append((lat, lon))
-    df = df[columns_to_keep]
+        if lat_lon_bounds(lat, lon, args.region):
+            columns_to_keep.add((lat, lon))
     if args.ocean_only or args.land_only:
         ocean_locations_file = f'ocean_locations_{dataset}.pkl'
-        # ocean_locations = []
-        # with open(OCEANS_GEOJSON) as f:
-        #     geojson = json.load(f)
-        # polygon: MultiPolygon = shape(geojson['features'][0]['geometry'])
-        # for i, (lat, lon) in enumerate(df.columns):
-        #     if polygon.contains(Point((lon, lat))):
-        #         ocean_locations.append((lat, lon))
-        #     if i % 100 == 0:
-        #         print(i)
-        # with open(ocean_locations_file, 'wb') as f:
-        #     pickle.dump(ocean_locations, f)
-        with open(ocean_locations_file, 'rb') as f:
-            ocean_locations = pickle.load(f)
-        if args.ocean_only:
-            df = df[ocean_locations]
+        if Path(ocean_locations_file).is_file():
+            with open(ocean_locations_file, 'rb') as f:
+                ocean_locations = set(pickle.load(f))
         else:
-            df = df.drop(ocean_locations, axis=1)
+            ocean_locations = set()
+            with open(OCEANS_GEOJSON) as f:
+                geojson = json.load(f)
+            polygon: MultiPolygon = shape(geojson['features'][0]['geometry'])
+            for i, (lat, lon) in enumerate(df.columns):
+                if polygon.contains(Point((lon, lat))):
+                    ocean_locations.add((lat, lon))
+                if i % 100 == 0:
+                    print(i)
+            with open(ocean_locations_file, 'wb') as f:
+                pickle.dump(list(ocean_locations), f)
+        if args.ocean_only:
+            columns_to_keep &= ocean_locations
+        else:
+            columns_to_keep &= (columns_to_keep ^ ocean_locations)
+    df = df[list(columns_to_keep)]
     # Jan 2000 onwards
     if dataset == 'slp':
         df = df.iloc[612 :, :]
-    elif dataset == 'temp':
+    else:
         df = df.iloc[252 :, :]
 
     base_file = dataset
@@ -78,8 +83,6 @@ def main():
     seq_file = f'{DATA_DIR}/seq_{base_file}.pkl'
     months = [args.month] if args.month else list(range(1, 13))
 
-    ## Helper functions
-
     def deseasonalise(df):
         def row_func(row: pd.Series):
             datetime_index = pd.DatetimeIndex(row.index)
@@ -88,54 +91,6 @@ def main():
                 row.loc[datetime_index.month == m] = (month_series.values - month_series.mean()) / month_series.std()
             return row
         return df.apply(row_func, axis=1)
-
-    def calculate_link_str(df: pd.DataFrame, method) -> pd.Series:
-        if method == 'max':
-            return df.max(axis=1)
-        # Default: as in Ludescher 2014
-        return (df.max(axis=1) - df.mean(axis=1)) / df.std(axis=1)
-
-    def build_link_str_df(series: pd.Series):
-        series.name = 'seq'
-        df = series.reset_index()
-        tuple_df_key_kwargs = dict(index=[df['lat'], df['lon']],
-            columns=[df['lat'], df['lon']])
-        str_df_key_kwargs = dict(index=[f'{r["lat"]}_{r["lon"]}_1' for i, r in df.iterrows()],
-            columns=[f'{r["lat"]}_{r["lon"]}_2' for i, r in df.iterrows()])
-        if args.lag_months:
-            link_str_df = pd.DataFrame(pd.DataFrame(**str_df_key_kwargs).unstack())
-            n = len(df.index)
-            for i, lag in enumerate(range(-1, -1 - args.lag_months, -1)):
-                unlagged = [list(l[args.lag_months :]) for l in np.array(df['seq'])]
-                lagged = [list(l[lag + args.lag_months : lag]) for l in np.array(df['seq'])]
-                combined = [*unlagged, *lagged]
-                cov_mat = np.abs(np.corrcoef(combined))
-                # Don't want self-joined nodes; set diagonal values to 0
-                np.fill_diagonal(cov_mat, 0)
-                # Get the correlations between the unlagged series at both locations
-                if i == 0:
-                    loc_1_unlag_loc_2_unlag_slice = cov_mat[0 : n, 0 : n]
-                    slice_df = pd.DataFrame(loc_1_unlag_loc_2_unlag_slice, **str_df_key_kwargs).unstack()
-                    link_str_df['s1_lag_0_s2_lag_0'] = slice_df
-                # Between lagged series at location 1 and unlagged series at location 2
-                loc_1_lag_loc_2_unlag_slice = cov_mat[n : 2 * n, 0 : n]
-                slice_df = pd.DataFrame(loc_1_lag_loc_2_unlag_slice, **str_df_key_kwargs).unstack()
-                link_str_df[f's1_lag_{-lag}_s2_lag_0'] = slice_df
-                # Between unlagged series at location 1 and lagged series at location 2
-                loc_1_unlag_loc_2_lag_slice = cov_mat[0 : n, n : 2 * n]
-                slice_df = pd.DataFrame(loc_1_unlag_loc_2_lag_slice, **str_df_key_kwargs).unstack()
-                link_str_df[f's1_lag_0_s2_lag_{-lag}'] = slice_df
-            link_str_df = link_str_df.drop(columns=[0])
-            link_str_df = calculate_link_str(link_str_df, LINK_STR_METHOD)
-            link_str_df = link_str_df.unstack()
-            link_str_df = pd.DataFrame(np.array(link_str_df), **tuple_df_key_kwargs)
-        else:
-            unlagged = [list(l) for l in np.array(df['seq'])]
-            cov_mat = np.abs(np.corrcoef(unlagged))
-            np.fill_diagonal(cov_mat, 0)
-            link_str_df = pd.DataFrame(cov_mat, **tuple_df_key_kwargs)
-        # TODO: reimplement link_str_geo_penalty between pairs of points
-        return link_str_df
 
     def prepare_seq_df(df):
         if args.month:
@@ -175,6 +130,7 @@ def main():
         start = datetime.now()
         print('Constructing sequences...')
         df = df.apply(seq_func, axis=0)
+        df.sort_index(axis=1, level=[0, 1], inplace=True)
         print(f'Sequences constructed; time elapsed: {datetime.now() - start}')
         return df
 
@@ -185,10 +141,11 @@ def main():
         print(f'Calculating sequences and saving to pickle file {seq_file}')
         seq_df = prepare_seq_df(df)
         seq_df.to_pickle(seq_file)
+        exit()
 
     if args.decadal:
-        d1_link_str_df = build_link_str_df(seq_df.loc[seq_df.index[0]])
-        d2_link_str_df = build_link_str_df(seq_df.loc[seq_df.index[1]])
+        d1_link_str_df, _= build_link_str_df_uv(seq_df.loc[seq_df.index[0]], args.lag_months)
+        d2_link_str_df, _ = build_link_str_df_uv(seq_df.loc[seq_df.index[1]], args.lag_months)
         d1_link_str_df_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d1.pkl'
         d2_link_str_df_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d2.pkl'
         d1_link_str_df.to_pickle(d1_link_str_df_file)
@@ -212,7 +169,7 @@ def main():
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
                 print(f'\n{date_summary}: calculating link strength data...')
                 start = datetime.now()
-                link_str_df = build_link_str_df(seq_dt)
+                link_str_df, _ = build_link_str_df_uv(seq_dt, args.lag_months)
                 link_str_df.to_pickle(links_file)
                 print((f'{date_summary}: link strengths calculated and saved to pickle file'
                     f' {links_file}; time elapsed: {datetime.now() - start}'))

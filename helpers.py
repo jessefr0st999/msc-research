@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
 
 def lat_lon_bounds(lat, lon, region='default'):
-    if region == 'aus':
+    if region == 'aus_oceans':
         # Indian and south Pacific oceans
         global_lon_bounds = lon < -90 or lon > 30
         global_lat_bounds = lat >= -60 and lat <= 25
@@ -19,7 +19,7 @@ def lat_lon_bounds(lat, lon, region='default'):
         return True
     return lat >= -60 and lat <= 60
 
-def prepare_df(data_dir, data_file, dataset):
+def prepare_df(data_dir, data_file, dataset, region='aus_oceans'):
     # TODO: pre-process precipitation as per other datasets
     if dataset == 'prec':
         raw_df = pd.read_csv(f'{data_dir}/{data_file}')
@@ -33,12 +33,11 @@ def prepare_df(data_dir, data_file, dataset):
         df.index = pd.to_datetime(df.index, format='D%Y.%m')
         columns_to_keep = set()
         for lat, lon in df.columns:
-            # if lat_lon_bounds(lat, lon, 'aus'):
-            if lat_lon_bounds(lat, lon):
+            if lat_lon_bounds(lat, lon, region):
                 columns_to_keep.add((lat, lon))
-        # with open(f'ocean_locations_{dataset}.pkl', 'rb') as f:
-        #     ocean_locations = set(pickle.load(f))
-        # columns_to_keep &= ocean_locations
+        with open(f'ocean_locations_{dataset}.pkl', 'rb') as f:
+            ocean_locations = set(pickle.load(f))
+        columns_to_keep &= ocean_locations
         df = df[list(columns_to_keep)]
         lats, lons = zip(*df.columns)
     return df, lats, lons
@@ -55,28 +54,43 @@ def prepare_indexed_df(raw_df, locations_df, month=None, new_index='date'):
     df = df.set_index(new_index)
     return df
 
+def rect_to_square(array: pd.DataFrame):
+    # Given array is n x m, rearrange it into a
+    # (n + m) x (n + m) matrix with blocks as below:
+    # [[ 0_n      array ]
+    #  [ array^T  O_m   ]]
+    n, m = array.shape
+    return np.concatenate((
+        np.concatenate((np.zeros((n, n)), array), axis=1),
+        np.concatenate((array.T, np.zeros((m, m))), axis=1),
+    ), axis=0)
+
 def link_str_to_adjacency(link_str_df: pd.DataFrame, edge_density=None,
-        threshold=None, lag_bool_df=None):
+        threshold=None, lag_bool_df=None, col_quantile=None):
+    adjacency = link_str_df * 0 + 1
     if edge_density:
         threshold = np.quantile(link_str_df, 1 - edge_density)
         print(f'Fixed edge density {edge_density} gives threshold {threshold}')
-    _link_str_df = link_str_df.copy() if lag_bool_df is None \
-        else link_str_df * lag_bool_df
-    if not _link_str_df.index.equals(link_str_df.columns):
-        n, m = link_str_df.shape
-        # Given link_str_df is n x m, rearrange it into a
-        # (n + m) x (n + m) matrix with blocks as below:
-        # [[ 0_n   LS  ]
-        #  [ LS^T  O_m ]]
-        link_str_array_square = np.concatenate((
-            np.concatenate((np.zeros((n, n)), _link_str_df), axis=1),
-            np.concatenate((_link_str_df.T, np.zeros((m, m))), axis=1),
-        ), axis=0)
-        _index = pd.MultiIndex.from_tuples([*_link_str_df.index.values,
-            *_link_str_df.columns.values], names=['lat', 'lon'])
-        _link_str_df = pd.DataFrame(link_str_array_square, index=_index, columns=_index)
-    adjacency = _link_str_df * 0
-    adjacency[_link_str_df >= threshold] = 1
+        # Only sensible for an n x m link_str_df
+        if col_quantile and not link_str_df.index.equals(link_str_df.columns):
+            # Thresholds vector is of length n
+            thresholds = link_str_df.quantile(1 - col_quantile, axis=0)
+            adjacency = link_str_df.apply(lambda row: \
+                np.where(row > thresholds.loc[row.name], 1, 0), axis=0)
+    if lag_bool_df is not None:
+        current_lag_threshold = np.quantile(link_str_df * lag_bool_df, 1 - edge_density)
+        print('Number of links:', lag_bool_df.sum().sum())
+        print('Link strength mean:', round((link_str_df * lag_bool_df).sum().sum() / lag_bool_df.sum().sum(), 4))
+        print(f'Link strength {1 - edge_density} quantile:', round(current_lag_threshold, 4))
+    adjacency[link_str_df < threshold] = 0
+    if lag_bool_df is not None:
+        adjacency *= lag_bool_df
+    if not adjacency.index.equals(adjacency.columns):
+        adjacency_square = rect_to_square(adjacency)
+        _index = pd.MultiIndex.from_tuples([*adjacency.index.values,
+            *adjacency.columns.values], names=['lat', 'lon'])
+        adjacency = pd.DataFrame(adjacency_square, index=_index, columns=_index)
+    # print(f'Links in network: {adjacency.sum().sum()}')
     if not edge_density and lag_bool_df is None:
         _edge_density = np.sum(np.sum(adjacency)) / adjacency.size
         print(f'Fixed threshold {threshold} gives edge density {_edge_density}')
@@ -105,7 +119,6 @@ def configure_plots(args):
         else:
             plt.show()
     return label_size, font_size, show_or_save
-
 
 def get_map(axis=None, region='aus'):
     # Default: world
