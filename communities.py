@@ -2,8 +2,6 @@ import argparse
 from datetime import datetime
 
 import networkx as nx
-import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 from networkx.algorithms import community
 
@@ -12,23 +10,22 @@ from helpers import read_link_str_df, configure_plots, get_map, \
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--seq_file', default='seq_alm_60_lag_0.pkl')
     parser.add_argument('--link_str_file', default='link_str_corr_alm_60_lag_0_2022_03.csv')
     parser.add_argument('--data_dir', default='data/precipitation')
     parser.add_argument('--output_folder', default=None)
-    parser.add_argument('--edge_density', type=float, default=0.005)
+    parser.add_argument('--edge_density', '--ed', type=float, default=0.005)
     parser.add_argument('--link_str_threshold', type=float, default=None)
-    parser.add_argument('--num_af_communities', type=int, default=10)
+    parser.add_argument('--num_comm_min', type=int, default=3)
+    parser.add_argument('--num_comm_max', type=int, default=6)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
     
     map_region = file_region_type(args.link_str_file)
-    seq_df = pd.read_pickle(f'{args.data_dir}/{args.seq_file}')
     link_str_df = read_link_str_df(f'{args.data_dir}/{args.link_str_file}')
     try:
         if 'decadal' in args.link_str_file:
-            date = seq_df.index[0] if 'd1' in args.link_str_file \
-                else seq_df.index[1]
+            date = datetime(2011, 4, 1) if 'd1' in args.link_str_file \
+                else datetime(2022, 3, 1)
             year = date.year
             month = date.month
         else:
@@ -43,56 +40,73 @@ def main():
         args.link_str_threshold)
     graph = nx.from_numpy_array(adjacency.values)
     graph = nx.relabel_nodes(graph, dict(enumerate(adjacency.columns)))
-
     lcc_graph = graph.subgraph(max(nx.connected_components(graph), key=len)).copy()
-    lv_partitions = [p for p in community.louvain_communities(lcc_graph)]
-    gm_partitions = [p for p in community.greedy_modularity_communities(lcc_graph)]
+
+    # Girvan-Newman is very slow
+    # girvan_newman_partitions = [p for p in next(community.girvan_newman(lcc_graph))]
+    greedy_mod_partitions = [p for p in community.greedy_modularity_communities(lcc_graph,
+        cutoff=args.num_comm_min, best_n=args.num_comm_max)]
     # NOTE: below algorithms are random, hence why a seed is specified
-    af_partitions = [p for p in community.asyn_fluidc(lcc_graph, args.num_af_communities, seed=0)]
-    al_partitions = [p for p in community.asyn_lpa_communities(lcc_graph, seed=0)]
-    colours = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', 'black', '#444']
+    fluid_partitions_all = {}
+    fluid_partitions_modularity = {}
+    for n in range(args.num_comm_min, args.num_comm_max + 1):
+        fluid_partitions_all[n] = [p for p in community.asyn_fluidc(lcc_graph, n, seed=0)]
+        fluid_partitions_modularity[n] = community.modularity(lcc_graph,
+            communities=fluid_partitions_all[n])
+    fluid_partitions = fluid_partitions_all[max(fluid_partitions_modularity,
+        key=fluid_partitions_modularity.get)]
+    label_prop_partitions = [p for p in community.asyn_lpa_communities(lcc_graph, seed=0)]
+    louvain_mod_partitions = [p for p in community.louvain_communities(lcc_graph, seed=0)]
 
     # Calculate colours of each node based on community
+    colours = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', 'black', '#444']
     lv_node_colours = []
     gm_node_colours = []
-    af_node_colours = []
-    al_node_colours = []
+    fl_node_colours = []
+    lp_node_colours = []
+    # gn_node_colours = []
     for n in lcc_graph.nodes:
-        for i, p in enumerate(lv_partitions):
-            if n in p:
-                lv_node_colours.append(colours[i % len(colours)])
-                break
-        for i, p in enumerate(gm_partitions):
+        for i, p in enumerate(greedy_mod_partitions):
             if n in p:
                 gm_node_colours.append(colours[i % len(colours)])
                 break
-        for i, p in enumerate(af_partitions):
+        for i, p in enumerate(label_prop_partitions):
             if n in p:
-                af_node_colours.append(colours[i % len(colours)])
+                lp_node_colours.append(colours[i % len(colours)])
                 break
-        for i, p in enumerate(al_partitions):
+        for i, p in enumerate(louvain_mod_partitions):
             if n in p:
-                al_node_colours.append(colours[i % len(colours)])
+                lv_node_colours.append(colours[i % len(colours)])
                 break
+        for i, p in enumerate(fluid_partitions):
+            if n in p:
+                fl_node_colours.append(colours[i % len(colours)])
+                break
+        # for i, p in enumerate(girvan_newman_partitions):
+        #     if n in p:
+        #         gn_node_colours.append(colours[i % len(colours)])
+        #         break
 
     figure, axes = plt.subplots(2, 2, layout='compressed')
     axes = axes.flatten()
-    axes[0].set_title(f'{dt.strftime("%b %Y")}: lv_partitions, {len(lv_partitions)} communities')
-    axes[1].set_title(f'{dt.strftime("%b %Y")}: gm_partitions, {len(gm_partitions)} communities')
-    axes[2].set_title(f'{dt.strftime("%b %Y")}: af_partitions, {args.num_af_communities} communities')
-    axes[3].set_title(f'{dt.strftime("%b %Y")}: al_partitions, {len(al_partitions)} communities')
-    lv_map = get_map(axes[0], region=map_region)
-    gm_map = get_map(axes[1], region=map_region)
-    af_map = get_map(axes[2], region=map_region)
-    al_map = get_map(axes[3], region=map_region)
+    axes[0].set_title(f'{dt.strftime("%b %Y")}: greedy_mod_partitions, {len(greedy_mod_partitions)} communities')
+    axes[1].set_title(f'{dt.strftime("%b %Y")}: fluid_partitions, {len(fluid_partitions)} communities')
+    axes[2].set_title(f'{dt.strftime("%b %Y")}: louvain_mod_partitions, {len(louvain_mod_partitions)} communities')
+    axes[3].set_title(f'{dt.strftime("%b %Y")}: label_prop_partitions, {len(label_prop_partitions)} communities')
+    # axes[4].set_title(f'{dt.strftime("%b %Y")}: girvan_newman_partitions, {len(girvan_newman_partitions)} communities')
+    gm_map = get_map(axes[0], region=map_region)
+    fl_map = get_map(axes[1], region=map_region)
+    lv_map = get_map(axes[2], region=map_region)
+    lp_map = get_map(axes[3], region=map_region)
+    # gn_map = get_map(axes[4], region=map_region)
     lats, lons = zip(*adjacency.columns)
     map_x, map_y = lv_map(lons, lats)
     pos = {}
     for i, elem in enumerate(adjacency.index):
         pos[elem] = (map_x[i], map_y[i])
-    for (axis, colours) in zip(axes, [lv_node_colours, gm_node_colours,
-            af_node_colours, al_node_colours]):
+    for (axis, colours) in zip(axes, [gm_node_colours, fl_node_colours,
+            lv_node_colours, lp_node_colours]):
         nx.draw_networkx_nodes(G=lcc_graph, pos=pos, nodelist=lcc_graph.nodes(),
             node_color=colours, alpha=0.8, ax=axis,
             node_size=400 if 'geo_agg' in args.link_str_file else 80)
@@ -103,4 +117,5 @@ def main():
         f'_{args.link_str_file.split("link_str_")[1].split(".csv")[0]}.png')
     show_or_save(figure, filename)
 
-main()
+if __name__ == '__main__':
+    main()
