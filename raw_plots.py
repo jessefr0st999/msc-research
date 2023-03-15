@@ -31,34 +31,44 @@ def main():
     df, lats, lons = prepare_df(args.data_dir, args.data_file, dataset)
     map_region = 'aus' if dataset == 'prec' else 'world'
 
-    # Plot for each month in the last year of available data
+    # Plot averages and standard deviations for each month
     mx, my = None, None
+    mean_min = np.Inf
+    mean_max = -np.Inf
+    sd_min = np.Inf
+    sd_max = -np.Inf
+    for month in range(1, 13):
+        df_m = df.loc[[i.month == month for i in df.index], :]
+        mean_min = np.min([mean_min, df_m.mean(axis=0).min()])
+        mean_max = np.max([mean_max, df_m.mean(axis=0).max()])
+        sd_min = np.min([sd_min, df_m.std(axis=0).min()])
+        sd_max = np.max([sd_max, df_m.std(axis=0).max()])
     figure, axes = plt.subplots(3, 4, layout='compressed')
     axes = iter(axes.flatten())
-    start_dt = datetime(args.start_year, args.start_month, 1)
-    end_dt = start_dt + relativedelta(months=11)
-    _min = np.Inf
-    _max = -np.Inf
-    for i, dt in enumerate(df.index.values):
-        dt = pd.to_datetime(dt)
-        if dt < start_dt or dt > end_dt:
-            continue
-        dt_values = df.iloc[i].values
-        _min = np.min([_min, dt_values.min()])
-        _max = np.max([_max, dt_values.max()])
-    for i, dt in enumerate(df.index.values):
-        dt = pd.to_datetime(dt)
-        if dt < start_dt or dt > end_dt:
-            continue
+    for month in range(1, 13):
+        df_m = df.loc[[i.month == month for i in df.index], :]
         axis = next(axes)
         _map = get_map(axis, region=map_region)
         if mx is None:
             mx, my = _map(lons, lats)
-        dt_values = df.iloc[i].values
-        scatter_map(axis, mx, my, dt_values, cb_min=_min, cb_max=_max,
-            size_func=lambda series: 75, cb_fs=label_size, cmap='jet')
-        axis.set_title(dt.strftime('%b %Y'), fontsize=font_size)
-    figure_title = f'{dataset}_{start_dt.strftime("%Y_%m")}_{end_dt.strftime("%Y_%m")}.png'
+        scatter_map(axis, mx, my, df_m.mean(axis=0), cb_min=mean_min, cb_max=mean_max,
+            size_func=lambda series: 75, cb_fs=label_size, cmap='inferno_r')
+        axis.set_title(datetime(2000, month, 1).strftime('%B') + ' mean', fontsize=font_size)
+    figure_title = f'{dataset}_monthly_means.png'
+    show_or_save(figure, figure_title)
+
+    figure, axes = plt.subplots(3, 4, layout='compressed')
+    axes = iter(axes.flatten())
+    for month in range(1, 13):
+        df_m = df.loc[[i.month == month for i in df.index], :]
+        axis = next(axes)
+        _map = get_map(axis, region=map_region)
+        if mx is None:
+            mx, my = _map(lons, lats)
+        scatter_map(axis, mx, my, df_m.std(axis=0), cb_min=sd_min, cb_max=sd_max,
+            size_func=lambda series: 75, cb_fs=label_size, cmap='inferno_r')
+        axis.set_title(datetime(2000, month, 1).strftime('%B') + ' SD', fontsize=font_size)
+    figure_title = f'{dataset}_monthly_st_devs.png'
     show_or_save(figure, figure_title)
 
     # Plot quantiles
