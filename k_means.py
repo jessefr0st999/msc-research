@@ -31,7 +31,7 @@ DECADE_DATES = [datetime(2000, 4 ,1), datetime(2011, 3 ,1),
     datetime(2011, 4 ,1), datetime(2022, 3 ,1)]
 
 def plot_clusters(series, kmeans_labels, axis, lons, lats, aus=True,
-        dot_size=20):
+        dot_size=20, region='aus'):
     # Order the colours based on average values in clusters
     cluster_means = []
     for k in set(kmeans_labels):
@@ -42,7 +42,7 @@ def plot_clusters(series, kmeans_labels, axis, lons, lats, aus=True,
     for i_old, i_new in enumerate(np.argsort(cluster_means)):
         permuted_colours[i_new] = KMEANS_COLOURS[len(cluster_means)][i_old]
     node_colours = [permuted_colours[cluster] for cluster in kmeans_labels]
-    _map = get_map(axis, aus=aus)
+    _map = get_map(axis, region=region)
     mx, my = _map(lons, lats)
     axis.scatter(mx, my, c=node_colours, s=dot_size)
 
@@ -91,6 +91,7 @@ def main():
     parser.add_argument('--gap', action='store_true', default=False)
     parser.add_argument('--decadal', action='store_true', default=False)
     parser.add_argument('--monthly', action='store_true', default=False)
+    parser.add_argument('--monthly_averages', action='store_true', default=False)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
@@ -121,13 +122,25 @@ def main():
         d2 = df.loc[DECADE_DATES[2] : DECADE_DATES[3], :]
         for i, m in enumerate(range(1, 12 + 1)):
             d1_m = np.array(d1.loc[[dt.month == m for dt in d1.index], :]).T
-            d2_m = np.array(d1.loc[[dt.month == m for dt in d2.index], :]).T
+            d2_m = np.array(d2.loc[[dt.month == m for dt in d2.index], :]).T
             try:
                 for j, k in enumerate(k_list):
-                    _, sils_df.iloc[j, i] = kmeans_fit(k, d1, args.constrain)
-                    _, sils_df.iloc[j, 12 + i] = kmeans_fit(k, d2, args.constrain)
+                    _, sils_df.iloc[j, i] = kmeans_fit(k, d1_m, args.constrain)
+                    _, sils_df.iloc[j, 12 + i] = kmeans_fit(k, d2_m, args.constrain)
             except ValueError:
                 continue
+    elif args.monthly_averages:
+        sils_df = pd.DataFrame(0, index=k_list, columns=['d1', 'd2'])
+        d1 = df.loc[DECADE_DATES[0] : DECADE_DATES[1], :]
+        d2 = df.loc[DECADE_DATES[2] : DECADE_DATES[3], :]
+        for j, k in enumerate(k_list):
+            d1_m_av = np.zeros((d1.shape[1], 12))
+            d2_m_av = np.zeros((d2.shape[1], 12))
+            for i, m in enumerate(range(1, 12 + 1)):
+                d1_m_av[:, i] = d1.loc[[dt.month == m for dt in d1.index], :].mean(axis=0)
+                d2_m_av[:, i] = d2.loc[[dt.month == m for dt in d2.index], :].mean(axis=0)
+            _, sils_df.iloc[j, 0] = kmeans_fit(k, d1_m_av, args.constrain)
+            _, sils_df.iloc[j, 1] = kmeans_fit(k, d2_m_av, args.constrain)
     else:
         sils_df = pd.Series(0, index=k_list)
         for j, k in enumerate(k_list):
@@ -145,16 +158,16 @@ def main():
     sils_df.index.name = 'num_clusters'
     print(sils_df)
 
-    # Next, plot results for k = 4, ..., 9
+    # Next, plot results for k = 2, ..., 9
     fig_name_base = f'{dataset}_kmeans'
     if args.constrain:
         fig_name_base += f'_c{round(100 * args.constrain)}'
-    k_list = list(range(4, 9 + 1))
+    k_list = list(range(2, 9 + 1))
     dot_size = 100 if args.output_folder else 20
     if args.decadal:
         d1 = np.array(df.loc[DECADE_DATES[0] : DECADE_DATES[1], :]).T
         d2 = np.array(df.loc[DECADE_DATES[2] : DECADE_DATES[3], :]).T
-        figure, axes = plt.subplots(2, 3, layout='compressed')
+        figure, axes = plt.subplots(2, 4, layout='compressed')
         axes = iter(axes.flatten())
         for k in k_list:
             labels_d1, sil_d1 = kmeans_fit(k, d1, args.constrain)
@@ -163,7 +176,7 @@ def main():
                 region=map_region)
             axis.set_title(f'Decade 1, {k} clusters, sil score {round(sil_d1, 4)}')
         show_or_save(figure, f'{fig_name_base}_decade_1.png')
-        figure, axes = plt.subplots(2, 3, layout='compressed')
+        figure, axes = plt.subplots(2, 4, layout='compressed')
         axes = iter(axes.flatten())
         for k in k_list:
             labels_d2, sil_d2 = kmeans_fit(k, d2, args.constrain)
@@ -175,33 +188,59 @@ def main():
     elif args.monthly:
         d1 = df.loc[DECADE_DATES[0] : DECADE_DATES[1], :]
         d2 = df.loc[DECADE_DATES[2] : DECADE_DATES[3], :]
-        for m in range(1, 12 + 1):
-            _dt = datetime(2000, m, 1)
-            d1_m = np.array(d1.loc[[dt.month == m for dt in d1.index], :]).T
-            figure, axes = plt.subplots(2, 3, layout='compressed')
+        for k in k_list:
+            figure, axes = plt.subplots(3, 4, layout='compressed')
             axes = iter(axes.flatten())
-            for k in k_list:
+            for m in range(1, 12 + 1):
+                d1_m = np.array(d1.loc[[dt.month == m for dt in d1.index], :]).T
                 labels_d1, sil_d1 = kmeans_fit(k, d1_m, args.constrain)
                 axis = next(axes)
                 plot_clusters(d1_m, labels_d1, axis, lons, lats, dot_size=dot_size,
                     region=map_region)
-                axis.set_title(f'Decade 1 {_dt.strftime("%b")}, {k} clusters, sil score {round(sil_d1, 4)}')
-            show_or_save(figure, f'{fig_name_base}_m{_dt.strftime("%m")}_decade_1.png')
-            d2_m = np.array(d2.loc[[dt.month == m for dt in d2.index], :]).T
-            figure, axes = plt.subplots(2, 3, layout='compressed')
+                axis.set_title(f'{datetime(2000, m, 1).strftime("%b")} D1, '
+                    f'k = {k}, sil score {round(sil_d1, 4)}')
+            show_or_save(figure, f'{fig_name_base}_months_decade_1_k{k}.png')
+                
+            figure, axes = plt.subplots(3, 4, layout='compressed')
             axes = iter(axes.flatten())
-            for k in k_list:
+            for m in range(1, 12 + 1):
+                d2_m = np.array(d2.loc[[dt.month == m for dt in d2.index], :]).T
                 labels_d2, sil_d2 = kmeans_fit(k, d2_m, args.constrain)
                 axis = next(axes)
                 plot_clusters(d2_m, labels_d2, axis, lons, lats, dot_size=dot_size,
                     region=map_region)
-                axis.set_title(f'Decade 2 {_dt.strftime("%b")}, {k} clusters, sil score {round(sil_d2, 4)}')
-            show_or_save(figure, f'{fig_name_base}_m{_dt.strftime("%m")}_decade_2.png')
+                axis.set_title(f'{datetime(2000, m, 1).strftime("%b")} D2, '
+                    f'k = {k}, sil score {round(sil_d2, 4)}')
+            show_or_save(figure, f'{fig_name_base}_months_decade_2_k{k}.png')
+    elif args.monthly_averages:
+        d1 = df.loc[DECADE_DATES[0] : DECADE_DATES[1], :]
+        d2 = df.loc[DECADE_DATES[2] : DECADE_DATES[3], :]
+        for k in k_list:
+            d1_m_av = np.zeros((d1.shape[1], 12))
+            d2_m_av = np.zeros((d2.shape[1], 12))
+            for i, m in enumerate(range(1, 12 + 1)):
+                d1_m_av[:, i] = d1.loc[[dt.month == m for dt in d1.index], :].mean(axis=0)
+                d2_m_av[:, i] = d2.loc[[dt.month == m for dt in d2.index], :].mean(axis=0)
+            labels_d1, sil_d1 = kmeans_fit(k, d1_m_av, args.constrain)
+            labels_d2, sil_d2 = kmeans_fit(k, d2_m_av, args.constrain)
+
+            figure, axes = plt.subplots(1, 2, layout='compressed')
+            axes = iter(axes.flatten())
+            axis = next(axes)
+            plot_clusters(d1_m_av, labels_d1, axis, lons, lats, dot_size=300,
+                region=map_region)
+            axis.set_title(f'D1, k = {k}, sil score {round(sil_d1, 4)}')
+            
+            axis = next(axes)
+            plot_clusters(d2_m_av, labels_d2, axis, lons, lats, dot_size=300,
+                region=map_region)
+            axis.set_title(f'D2, k = {k}, sil score {round(sil_d2, 4)}')
+            show_or_save(figure, f'{fig_name_base}_monthly_averages_k{k}.png')
     else:
         for i, dt in enumerate(df.index.values):
             _dt = pd.to_datetime(dt)
             dt = np.array(df.iloc[i, :]).reshape(-1, 1)
-            figure, axes = plt.subplots(2, 3, layout='compressed')
+            figure, axes = plt.subplots(2, 4, layout='compressed')
             axes = iter(axes.flatten())
             for k in k_list:
                 labels, sil = kmeans_fit(k, dt, args.constrain)
