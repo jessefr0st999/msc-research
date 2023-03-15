@@ -6,3 +6,6 @@ outputs
 basemap-*
 geckodriver*
 images/*
+*.geojson
+*.pkl
+.ipynb_checkpoints
