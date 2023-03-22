@@ -2,10 +2,13 @@ from pathlib import Path
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import argparse
+from itertools import combinations
 
 import pandas as pd
 import numpy as np
 # from geopy.distance import geodesic
+from sklearn.linear_model import LinearRegression
+from scipy.stats import spearmanr
 
 YEARS = list(range(2000, 2022 + 1))
 # LINK_STR_METHOD = None
@@ -23,7 +26,7 @@ def aggregate_lagged_corrs(array: np.array, method):
         agg_func = lambda x: (np.max(x) - np.mean(x)) / np.std(x)
     return np.apply_along_axis(agg_func, 2, array), np.argmax(array, 2)
 
-def build_link_str_df_uv(series: pd.Series, lag_months):
+def build_link_str_df_uv(series: pd.Series, lag_months=None, method='pearson'):
     # TODO: NOAA and prec dataframes/series in the same format, regardless of lag
     if isinstance(series, pd.DataFrame):
         series = pd.Series(
@@ -35,6 +38,7 @@ def build_link_str_df_uv(series: pd.Series, lag_months):
         )
     n = len(series)
     if lag_months:
+        # NOTE: Only implemented for 'corr' (Pearson correlation) method
         # link_str_array consists of 'sheets' of size n x n containing all pairs
         # of (prec location, prec location). The third dimension contains, for
         # a given location pair, the values for each lag
@@ -60,9 +64,27 @@ def build_link_str_df_uv(series: pd.Series, lag_months):
             columns=series.index)
     else:
         unlagged = [list(seq) for seq in np.array(series)]
-        cov_mat = np.abs(np.corrcoef(unlagged))
-        np.fill_diagonal(cov_mat, 0)
-        link_str_array = cov_mat
+        # TODO: speed up regression
+        if method == 'reg':
+            # Absolute value of linear regression coefficient
+            link_str_array = np.zeros((len(unlagged), len(unlagged)))
+            for i, j in combinations(range(len(unlagged)), 2):
+                reg_gradient_1 = LinearRegression().fit(
+                    np.column_stack([unlagged[i]]), unlagged[j]).coef_[0]
+                reg_gradient_2 = LinearRegression().fit(
+                    np.column_stack([unlagged[j]]), unlagged[i]).coef_[0]
+                value = np.min(np.abs([reg_gradient_1, reg_gradient_2]))
+                link_str_array[i, j] = link_str_array[j, i] = value
+            print(f'Total time elapsed: {datetime.now() - start}')
+        elif method == 'spearman':
+            # Spearman correlation coefficient
+            link_str_array = np.abs(spearmanr(np.array(unlagged).T).statistic)
+        elif method == 'pearson':
+            # Absolute value of Pearson correlation
+            link_str_array = np.abs(np.corrcoef(unlagged))
+        else:
+            raise ValueError(f'Unknown link strength method: "{method}"')
+        np.fill_diagonal(link_str_array, 0)
         link_str_max_lags = None
     # Return n x n matrices
     return pd.DataFrame(link_str_array, index=series.index, columns=series.index), \
@@ -71,46 +93,55 @@ def build_link_str_df_uv(series: pd.Series, lag_months):
 def main():
     parser = argparse.ArgumentParser()
     # Hyperparameters
+    parser.add_argument('--method', default='pearson')
     parser.add_argument('--avg_lookback_months', '--alm', type=int, default=60)
     parser.add_argument('--lag_months', '--lag', type=int, default=0)
     parser.add_argument('--link_str_geo_penalty', type=float, default=0)
     parser.add_argument('--deseasonalise', action='store_true', default=False)
-    parser.add_argument('--decadal', action='store_true', default=False)
-    parser.add_argument('--yearly', action='store_true', default=False)
     parser.add_argument('--geo_agg', action='store_true', default=False)
+    # Build networks for each decade, with lookback over all months in the decade
+    parser.add_argument('--decadal', action='store_true', default=False)
+    # Build networks timestamped only from a given month (generally March)
     parser.add_argument('--month', type=int, default=None)
+    # Build networks for a given month, comparing only that month in other years
+    parser.add_argument('--month_only', type=int, default=None)
+    # Build networks for each decade, correlating each month with that of prior years
+    parser.add_argument('--decadal_yearly', action='store_true', default=False)
     # NOTE: This should not be used with lag
     parser.add_argument('--exp_kernel', type=float, default=None)
 
-    # Input/output controls
-    parser.add_argument('--file_tag', default='')
-
     args = parser.parse_args()
 
-    base_file = '_decadal' if args.decadal else f'_alm_{args.avg_lookback_months}'
-    if args.file_tag:
-        base_file = f'{args.file_tag}{base_file}'
-    if args.month:
-        month_str = str(args.month) if args.month >= 10 else f'0{args.month}'
+    if args.decadal or args.decadal_yearly:
+        base_file = 'decadal'
+    else:
+        base_file = f'alm_{args.avg_lookback_months}'
+    if args.month_only:
+        month_str = str(args.month_only) if args.month_only >= 10 else f'0{args.month_only}'
         base_file += f'_m{month_str}'
     base_file += '_geo_agg' if args.geo_agg else ''
     base_file += '_des' if args.deseasonalise else ''
-    base_links_file = f'{base_file}_lag_{args.lag_months}'
-    if not args.decadal:
+    base_links_file = base_file
+    if args.decadal_yearly:
+        base_links_file += '_yearly'
+    if args.method != 'pearson':
+        base_links_file += f'_{args.method}'
+    base_links_file += f'_lag_{args.lag_months}'
+    if not (args.decadal or args.decadal_yearly):
         base_file += f'_lag_{args.lag_months}'
 
-    prec_seq_file = f'{DATA_DIR}/seq_prec{base_file}.pkl'
-    months = [args.month] if args.month else list(range(1, 13))
+    prec_seq_file = f'{DATA_DIR}/seq_prec_{base_file}.pkl'
 
-    def deseasonalise(df):
-        def row_func(row: pd.Series):
-            datetime_index = pd.DatetimeIndex(row.index)
-            for m in months:
-                month_series = row.loc[datetime_index.month == m]
-                row.loc[datetime_index.month == m] = \
-                    (month_series.values - month_series.mean()) / month_series.std()
-            return row
-        return df.apply(row_func, axis=1)
+    # TODO: improve this
+    # def deseasonalise(df):
+    #     def row_func(row: pd.Series):
+    #         datetime_index = pd.DatetimeIndex(row.index)
+    #         for m in months:
+    #             month_series = row.loc[datetime_index.month == m]
+    #             row.loc[datetime_index.month == m] = \
+    #                 (month_series.values - month_series.mean()) / month_series.std()
+    #         return row
+    #     return df.apply(row_func, axis=1)
 
     def exp_kernel(seq, k):
         # k is the factor by which the start of the sequence is multiplied
@@ -129,16 +160,16 @@ def main():
             locations_df = pd.read_csv(LOCATIONS_FILE)
             df = pd.concat([locations_df, raw_df], axis=1)
             df = df.set_index(['Lat', 'Lon'])
-        if args.month:
-            df = df.loc[:, [c.month == args.month for c in df.columns]]
-        if args.deseasonalise:
-            df = deseasonalise(df)
+        if args.month_only:
+            df = df.loc[:, [c.month == args.month_only for c in df.columns]]
+        # if args.deseasonalise:
+        #     df = deseasonalise(df)
         def seq_func(row: pd.Series):
-            # Places value at current timestamp at end of list
-            # Values decrease in time as the sequence goes left
-            if args.decadal:
-                start_dates = [datetime(2000, 4, 1), datetime(2011, 3, 1)]
-                end_dates = [datetime(2011, 4, 1), datetime(2022, 3, 1)]
+            # Place the value at the current timestamp at the start of list
+            # Values hence decrease in time as the sequence progresses
+            if args.decadal or args.decadal_yearly:
+                start_dates = [datetime(2000, 4, 1), datetime(2011, 4, 1)]
+                end_dates = [datetime(2011, 3, 1), datetime(2022, 3, 1)]
                 def func(start_date, end_date, r: pd.Series):
                     sequence = list(r.loc[start_date : end_date])
                     sequence.reverse()
@@ -150,7 +181,7 @@ def main():
             else:
                 def func(start_date, end_date, r: pd.Series):
                     sequence = list(r[(r.index > start_date) & (r.index <= end_date)])
-                    seq_length = args.avg_lookback_months // 12 if args.month else \
+                    seq_length = args.avg_lookback_months // 12 if args.month_only else \
                         args.avg_lookback_months + args.lag_months
                     if len(sequence) != seq_length:
                         return None
@@ -158,7 +189,7 @@ def main():
                         sequence = exp_kernel(sequence, args.exp_kernel)
                     return sequence
                 vec_func = np.vectorize(func, excluded=['r'])
-                seq_lookback = args.avg_lookback_months if args.month else \
+                seq_lookback = args.avg_lookback_months if args.month_only else \
                     args.avg_lookback_months + args.lag_months
                 start_dates = [d - relativedelta(months=seq_lookback) for d in row.index]
                 end_dates = [d for d in row.index]
@@ -169,10 +200,7 @@ def main():
         print('Constructing sequences...')
         df = df.apply(seq_func, axis=1)       
         print(f'Sequences constructed; time elapsed: {datetime.now() - start}')
-        df = df.stack().reset_index()
-        df = df.rename(columns={'level_2': 'date', 0: 'prec_seq', 'Lat': 'lat', 'Lon': 'lon'})
-        df = df.set_index('date')
-        return df
+        return df.T
 
     if Path(prec_seq_file).is_file():
         print(f'Reading precipitation sequences from pickle file {prec_seq_file}')
@@ -182,11 +210,46 @@ def main():
         prec_df = prepare_prec_df()
         prec_df.to_pickle(prec_seq_file)
 
-    if args.decadal:
-        d1_link_str_df, d1_max_lags = build_link_str_df_uv(prec_df.loc[prec_df.index[0]], args.lag_months)
-        d2_link_str_df, d2_max_lags = build_link_str_df_uv(prec_df.loc[prec_df.index[1]], args.lag_months)
-        d1_link_str_df_file = f'{DATA_DIR}/link_str_corr{base_links_file}_d1'
-        d2_link_str_df_file = f'{DATA_DIR}/link_str_corr{base_links_file}_d2'
+    if args.decadal or args.decadal_yearly:
+        d1_series = prec_df.loc[prec_df.index[0]]
+        d2_series = prec_df.loc[prec_df.index[1]]
+        if args.decadal_yearly:
+            def _agg(array):
+                return np.nanmean(array, axis=2)
+                # NaN-proof Euclidean norm
+                # return np.sqrt(np.nansum(np.square(array), axis=2))
+            d1_link_str_array = np.zeros((len(d1_series.index), len(d1_series.index), 12))
+            d2_link_str_array = np.zeros((len(d2_series.index), len(d2_series.index), 12))
+            for m in range(1, 12 + 1):
+                d1_indices = []
+                d2_indices = []
+                for i in range(len(d1_series.iloc[0])):
+                    # Decade 1 series ends in March (first element of its sequence)
+                    if i % 12 == (m - 3) % 12:
+                        d1_indices.append(i)
+                for i in range(len(d2_series.iloc[0])):
+                    # Decade 2 series ends in April (first element of its sequence)
+                    if i % 12 == (m - 4) % 12:
+                        d2_indices.append(i)
+                d1_series_m = d1_series.apply(lambda seq: np.array(seq)[d1_indices])
+                d2_series_m = d2_series.apply(lambda seq: np.array(seq)[d2_indices])
+                d1_link_str_df_m, d1_max_lags = build_link_str_df_uv(d1_series_m,
+                    method=args.method)
+                d2_link_str_df_m, d2_max_lags = build_link_str_df_uv(d2_series_m,
+                    method=args.method)
+                d1_link_str_array[:, :, m - 1] = d1_link_str_df_m
+                d2_link_str_array[:, :, m - 1] = d2_link_str_df_m
+            d1_link_str_df = pd.DataFrame(_agg(d1_link_str_array),
+                index=d1_series.index, columns=d1_series.index)
+            d2_link_str_df = pd.DataFrame(_agg(d2_link_str_array),
+                index=d2_series.index, columns=d2_series.index)
+        else:
+            d1_link_str_df, d1_max_lags = build_link_str_df_uv(d1_series,
+                args.lag_months, args.method)
+            d2_link_str_df, d2_max_lags = build_link_str_df_uv(d2_series,
+                args.lag_months, args.method)
+        d1_link_str_df_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d1'
+        d2_link_str_df_file = f'{DATA_DIR}/link_str_corr_{base_links_file}_d2'
         d1_link_str_df.to_csv(f'{d1_link_str_df_file}.csv')
         d2_link_str_df.to_csv(f'{d2_link_str_df_file}.csv')
         print(f'Decadal link strengths calculated and saved to CSV files'
@@ -196,11 +259,9 @@ def main():
             d2_max_lags.to_pickle(f'{d2_link_str_df_file}_max_lags.pkl')
     else:
         for y in YEARS:
-            if y != 2022:
-                continue
-            for m in months:
-                # Always use March as the reference month for the "yearly" networks
-                if args.yearly and m != 3:
+            for m in range(1, 12 + 1):
+                _month = args.month or args.month_only
+                if _month and m != _month:
                     continue
                 dt = datetime(y, m, 1)
                 try:
@@ -210,14 +271,14 @@ def main():
                         continue
                 except KeyError:
                     continue
-                links_file = (f'{DATA_DIR}/link_str_corr{base_links_file}')
+                links_file = (f'{DATA_DIR}/link_str_corr_{base_links_file}')
                 if args.link_str_geo_penalty:
                     links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
                 links_file += f'_{dt.strftime("%Y")}' if args.month else f'_{dt.strftime("%Y_%m")}'
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
                 print(f'\n{date_summary}: calculating link strength data...')
                 start = datetime.now()
-                link_str_df, max_lags = build_link_str_df_uv(prec_dt, args.lag_months)
+                link_str_df, max_lags = build_link_str_df_uv(prec_dt, args.lag_months, args.method)
                 print((f'{date_summary}: link strengths calculated and saved to CSV file'
                     f' {links_file}.csv; time elapsed: {datetime.now() - start}'))
                 link_str_df.to_csv(f'{links_file}.csv')

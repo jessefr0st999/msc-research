@@ -15,8 +15,8 @@ def main():
     parser.add_argument('--output_folder', default=None)
     parser.add_argument('--edge_density', '--ed', type=float, default=0.005)
     parser.add_argument('--link_str_threshold', type=float, default=None)
-    parser.add_argument('--num_comm_min', type=int, default=3)
-    parser.add_argument('--num_comm_max', type=int, default=6)
+    parser.add_argument('--num_comm_min', '--min', type=int, default=3)
+    parser.add_argument('--num_comm_max', '--max', type=int, default=6)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
     
