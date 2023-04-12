@@ -107,6 +107,7 @@ def main():
     parser.add_argument('--month_only', type=int, default=None)
     # Build networks for each decade, correlating each month with that of prior years
     parser.add_argument('--decadal_yearly', action='store_true', default=False)
+    parser.add_argument('--season', default=None)
     # NOTE: This should not be used with lag
     parser.add_argument('--exp_kernel', type=float, default=None)
 
@@ -124,6 +125,8 @@ def main():
     base_links_file = base_file
     if args.decadal_yearly:
         base_links_file += '_yearly'
+        if args.season:
+            base_links_file += f'_{args.season}'
     if args.method != 'pearson':
         base_links_file += f'_{args.method}'
     base_links_file += f'_lag_{args.lag_months}'
@@ -215,6 +218,16 @@ def main():
         d2_series = prec_df.loc[prec_df.index[1]]
         if args.decadal_yearly:
             def _agg(array):
+                if args.season == 'summer':
+                    # Trick to get the entries with indices 0, 1, 11 in once slice
+                    joined_array = np.concatenate((array, array), axis=2)
+                    return np.nanmean(joined_array[:, :, 11 : 14], axis=2)
+                if args.season == 'autumn':
+                    return np.nanmean(array[:, :, 2 : 5], axis=2)
+                if args.season == 'winter':
+                    return np.nanmean(array[:, :, 5 : 8], axis=2)
+                if args.season == 'spring':
+                    return np.nanmean(array[:, :, 8 : 11], axis=2)
                 return np.nanmean(array, axis=2)
                 # NaN-proof Euclidean norm
                 # return np.sqrt(np.nansum(np.square(array), axis=2))
