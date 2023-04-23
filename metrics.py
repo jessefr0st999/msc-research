@@ -182,16 +182,16 @@ def main():
         closeness_centrality_df.loc[dt] = cc
         whole_graph_metrics_df.loc[dt, 'average_closeness_centrality'] = np.mean(list(cc.values()))
         try:
-            # TODO: investigate why this often fails
-            ec = nx.eigenvector_centrality(graph)
+            # NOTE: EC often fails with the default tolerance
+            ec = nx.eigenvector_centrality(graph, tol=1e-03)
             eigenvector_centrality_df.loc[dt] = ec
             whole_graph_metrics_df.loc[dt, 'average_eigenvector_centrality'] = np.mean(list(ec.values()))
         except nx.exception.PowerIterationFailedConvergence:
             print(f'PowerIterationFailedConvergence exception for {date_summary} eigenvector centrality')
-        print(f'{date_summary}: {len(fluid_partitions) =}')
-        print(f'{date_summary}: {len(greedy_mod_partitions) =}')
-        print(f'{date_summary}: {len(label_prop_partitions) =}')
-        print(f'{date_summary}: {len(louvain_partitions) =}')
+        print(f'{date_summary}: {len(fluid_partitions)} fluid_partitions')
+        print(f'{date_summary}: {len(greedy_mod_partitions)} greedy_mod_partitions')
+        print(f'{date_summary}: {len(label_prop_partitions)} label_prop_partitions')
+        print(f'{date_summary}: {len(louvain_partitions)} louvain_partitions')
         print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
         
     if 'decadal' in args.link_str_file_tag:
