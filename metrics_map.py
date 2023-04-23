@@ -20,6 +20,15 @@ metric_names = [
     # 'eigenvector_centrality',
 ]
 
+PLOT_SCALES = {
+    # 'degree': [0, 80],
+    # 'weighted_degree': [0, 850],
+    'degree': [0, 60],
+    'weighted_degree': [0, 700],
+    'betweenness_centrality': [0, 0.18],
+    'closeness_centrality': [0, 0.12],
+}
+
 def size_func(series):
     series_norm = series / np.max(series)
     return [50 * n for n in series_norm]
@@ -32,6 +41,7 @@ def main():
     parser.add_argument('--output_folder', default=None)
     parser.add_argument('--yearly', action='store_true', default=False)
     parser.add_argument('--last_dt', action='store_true', default=False)
+    parser.add_argument('--common_scales', action='store_true', default=False)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
     map_region = file_region_type(args.metrics_file_base)
@@ -56,14 +66,18 @@ def main():
             axis = axes[0, i]
             _map = get_map(axis, region=map_region)
             mx, my = _map(lons, lats)
-            scatter_map(axis, mx, my, df.loc[d1_dt], cb_min=df_min, cb_max=df_max, cb_fs=label_size,
+            scatter_map(axis, mx, my, df.loc[d1_dt], cb_fs=label_size,
+                cb_min=PLOT_SCALES[metric_name][0] if args.common_scales else df_min,
+                cb_max=PLOT_SCALES[metric_name][1] if args.common_scales else df_max,
                 size_func=lambda series: 100 if args.output_folder else 20)
             axis.set_title(f'decade 1: {metric_name}')
 
             axis = axes[1, i]
             _map = get_map(axis, region=map_region)
             mx, my = _map(lons, lats)
-            scatter_map(axis, mx, my, df.loc[d2_dt], cb_min=df_min, cb_max=df_max, cb_fs=label_size,
+            scatter_map(axis, mx, my, df.loc[d2_dt], cb_fs=label_size,
+                cb_min=PLOT_SCALES[metric_name][0] if args.common_scales else df_min,
+                cb_max=PLOT_SCALES[metric_name][1] if args.common_scales else df_max,
                 size_func=lambda series: 100 if args.output_folder else 20)
             axis.set_title(f'decade 2: {metric_name}')
         show_or_save(figure, f'{args.metrics_file_base}_decadal.png')
