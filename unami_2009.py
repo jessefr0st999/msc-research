@@ -28,41 +28,48 @@ def main():
     parser.add_argument('--data_dir', default='data/precipitation')
     parser.add_argument('--data_file', default='FusedData.csv')
     parser.add_argument('--prec_inc', type=int, default=500)
+    parser.add_argument('--x_steps', type=int, default=30)
+    parser.add_argument('--t_steps', type=int, default=30)
+    parser.add_argument('--s_steps', type=int, default=1000)
+    parser.add_argument('--calculate_model_df', action='store_true', default=False)
+    parser.add_argument('--plot', action='store_true', default=False)
     args = parser.parse_args()
 
     prec_df, lats, lons = prepare_df(args.data_dir, args.data_file, 'prec')
-    cum_sums = prec_df[SERIES_KEY].cumsum()
-    times = prec_df.index.values
-    
-    # Calculate values of the temporal variable X
-    model_df_values = []
-    for i, s in enumerate(cum_sums):
-        # t_delta: at a given t, how far (in hours) do you have to look back until the
-        # difference surpasses prec_inc (delta in paper)
-        if s - cum_sums[0] < args.prec_inc:
-            continue
-        i_prev = i - 1
-        while s - cum_sums[i_prev] < args.prec_inc:
-            i_prev -= 1
-        if i_prev == i - 1:
-            # Handle case where the threshold is exceeded by multiples of the jump on the
-            # latest timestamp by using a fraction of the time granularity for t_delta
-            inc_jumps = int((s - cum_sums[i_prev]) // args.prec_inc)
-            t_delta = (times[i_prev + 1] - times[i_prev]).days / inc_jumps
-            ######################################################
-            # print(times[i].strftime('%Y %m'), i, i - i_prev, round(s),
-            #     round(s - cum_sums[i_prev]), inc_jumps, round(t_delta, 2))
-            ######################################################
-        else:
-            t_delta = (times[i] - times[i_prev]).days
-        t_delta += np.random.normal(0, 10)
-        x = np.log(args.prec_inc / t_delta)
-        model_df_values.append((s, times[i], x, t_delta))
-    model_df = pd.DataFrame(model_df_values)
-    model_df.columns = ['s', 't', 'x', 't_delta']
     filename = f'{args.data_dir}/{OUTPUT_FILE}'
-    # model_df.to_csv(filename)
-    # print(f'model_df saved to file {filename}')
+    if args.calculate_model_df:
+        cum_sums = prec_df[SERIES_KEY].cumsum()
+        times = prec_df.index.values
+        # Calculate values of the temporal variable X
+        model_df_values = []
+        for i, s in enumerate(cum_sums):
+            # t_delta: at a given t, how far (in hours) do you have to look back until the
+            # difference surpasses prec_inc (delta in paper)
+            if s - cum_sums[0] < args.prec_inc:
+                continue
+            i_prev = i - 1
+            while s - cum_sums[i_prev] < args.prec_inc:
+                i_prev -= 1
+            if i_prev == i - 1:
+                # Handle case where the threshold is exceeded by multiples of the jump on the
+                # latest timestamp by using a fraction of the time granularity for t_delta
+                inc_jumps = int((s - cum_sums[i_prev]) // args.prec_inc)
+                t_delta = (times[i_prev + 1] - times[i_prev]).days / inc_jumps
+                ######################################################
+                # print(times[i].strftime('%Y %m'), i, i - i_prev, round(s),
+                #     round(s - cum_sums[i_prev]), inc_jumps, round(t_delta, 2))
+                ######################################################
+            else:
+                t_delta = (times[i] - times[i_prev]).days
+            t_delta += np.random.normal(0, 10)
+            x = np.log(args.prec_inc / t_delta)
+            model_df_values.append((s, times[i], x, t_delta))
+        model_df = pd.DataFrame(model_df_values)
+        model_df.columns = ['s', 't', 'x', 't_delta']
+        model_df.to_csv(filename)
+        print(f'model_df saved to file {filename}')
+    else:
+        model_df = pd.read_csv(filename)
 
     # Estimate parameter functions by estimating least squares coefficients for fitting the
     # functions as polynomials in x multiplied by sin/cos in t
@@ -108,6 +115,21 @@ def main():
                     X_mat[j, (1 + 2*n_t) * i + 2*k + 2] = x_pow * np.cos(theta)
         X_mats[param] = X_mat
         beta_hats[param] = np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T @ y_vec
+    
+    # Next, build discretisation scheme
+    n = args.x_steps
+    m = args.t_steps
+    z = args.s_steps
+    t_data = np.array(range(m + 1))
+    x_inf = x_data.min()
+    x_sup = x_data.max()
+    delta_x = (x_sup - x_inf) / n
+    delta_t = 1 # Should this be in a time unit?
+    # delta_s = s_data.max() / z
+    delta_s = 1
+    print('delta_x', delta_x)
+    print('delta_t', delta_t)
+    print('delta_s', delta_s)
 
     def param_func(param, t, x=None):
         n_X, n_t, _ = param_info[param]
@@ -117,14 +139,103 @@ def main():
             x_pow = 1 if i == 0 else x ** i
             X_vec[(1 + 2*n_t) * i] = x_pow
             for k in range(n_t):
-                theta = 2*np.pi * t * (k + 1) / P
+                # Time period now equal to number of time steps
+                theta = 2*np.pi * t * (k + 1) / m
                 X_vec[(1 + 2*n_t) * i + 2*k + 1] = x_pow * np.sin(theta)
                 X_vec[(1 + 2*n_t) * i + 2*k + 2] = x_pow * np.cos(theta)
         return X_vec @ beta_hats[param]
+    def _beta(t):
+        return param_func('beta', t)
+    def _v(t, x):
+        return np.exp(param_func('psi', t, x))
+    def _K(t):
+        return np.exp(param_func('kappa', t))
+    
+    def peclet_num(x, t):
+        return _K(t) * (_beta(t) - x) * delta_x / _v(t, x)
+    
+    M_mats = [np.zeros((n - 1, n - 1, 4)) for _ in range(m)]
+    G_mats = [np.zeros((n - 1, n - 1)) for _ in range(m)]
+    H_mats = [np.zeros((n - 1, n - 1)) for _ in range(m)]
+    for k in range(n - 1):
+        print(k, '/', n)
+        x_k = x_data[k]
+        x_km1 = x_data[k - 1] if k > 0 else 0
+        x_km0p5 = (x_km1 + x_k) / 2
+        x_kp1 = x_data[k + 1] if k < n - 2 else 0
+        x_kp0p5 = (x_k + x_kp1) / 2
+        for j in range(m):
+            t = t_data[j + 1]
+            pe_l = peclet_num(x_km0p5, t)
+            p_l = np.exp(pe_l)
+            pe_r = peclet_num(x_kp0p5, t)
+            p_r = np.exp(-pe_r)
 
-    print(X_mats['beta'].shape, beta_hats['beta'].shape)
-    print(X_mats['psi'].shape, beta_hats['psi'].shape)
-    print(X_mats['kappa'].shape, beta_hats['kappa'].shape)
+            # Contributions from phi du/ds term
+            f = lambda x: 1 /_v(t, x)
+            if k > 0:
+                G_mats[j][k, k - 1] = delta_x**2 / delta_s * f(x_km1) \
+                    / (p_l + 1) / (p_l + 2)
+                M_mats[j][k, k - 1, 0] = -G_mats[j][k, k - 1]
+            G_mats[j][k, k] = delta_x**2 / delta_s * f(x_k) \
+                * (1 / (p_l + 2) + 1 / (p_r + 2))
+            M_mats[j][k, k, 0] = -G_mats[j][k, k]
+            if k < n - 2:
+                G_mats[j][k, k + 1] = delta_x**2 / delta_s * f(x_kp1) \
+                    / (p_r + 1) / (p_r + 2)
+                M_mats[j][k, k + 1, 0] = -G_mats[j][k, k + 1]
+
+            # Contributions from phi du/dt term
+            f = lambda x: np.exp(-x) /_v(t, x)
+            if k > 0:
+                H_mats[j][k, k - 1] = delta_x**2 / delta_t * f(x_km1) \
+                    / (p_l + 1) / (p_l + 2)
+                M_mats[j][k, k - 1, 1] = -H_mats[j][k, k - 1]
+            H_mats[j][k, k] = delta_x**2 / delta_t * f(x_k) \
+                * (1 / (p_l + 2) + 1 / (p_r + 2))
+            M_mats[j][k, k, 1] = -H_mats[j][k, k]
+            if k < n - 2:
+                H_mats[j][k, k + 1] = delta_x**2 / delta_t * f(x_kp1) \
+                    / (p_r + 1) / (p_r + 2)
+                M_mats[j][k, k + 1, 1] = -H_mats[j][k, k + 1]
+
+            # Contributions from phi du/dx term``
+            if k > 0:
+                M_mats[j][k, k - 1, 2] = -pe_l / (p_l + 1)
+            M_mats[j][k, k, 2] = pe_l / (p_l + 1) - pe_r / (p_r + 1)
+            if k < n - 2:
+                M_mats[j][k, k + 1, 2] = pe_r / (p_r + 1)
+
+            # Contributions from dphi/dx du/dx term
+            if k > 0:
+                M_mats[j][k, k - 1, 3] = 1/2
+            M_mats[j][k, k, 3] = -1
+            if k < n - 2:
+                M_mats[j][k, k + 1, 3] = 1/2
+
+    M_mats = [mat.sum(axis=2) for mat in M_mats]
+    
+    # Solve iteratively for each s
+    u_vecs = [np.ones(m * (n - 1))]
+    for i in range(z):
+        A_mat = np.zeros((m * (n - 1), m * (n - 1)))
+        b_vec = np.zeros((m * (n - 1), 1))
+        for j in range(m):
+            start = j*(n - 1)
+            end = start + n - 1
+            b_vec[start : end] = (G_mats[j] @ u_vecs[i][start : end]).reshape((n - 1, 1))
+            A_mat[start : end, start : end] = M_mats[j]
+            if j <= m - 2:
+                A_mat[start : end, start + n - 1 : end + n - 1] = H_mats[j + 1]
+        # Periodic boundary condition
+        A_mat[(m - 1)*(n - 1) : m*(n - 1), 0 : n - 1] = -H_mats[0]
+        u_vecs.append(np.linalg.solve(A_mat, b_vec))
+        print()
+        print(u_vecs[i+1].reshape((m, n - 1)))
+        print(i, u_vecs[i+1].mean(), u_vecs[i+1].std(), u_vecs[i+1].sum())
+
+    if not args.plot:
+        return
 
     figure, axes = plt.subplots(3, 2)
     axes = iter(axes.T.flatten())
