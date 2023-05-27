@@ -45,7 +45,7 @@ def plot_data(model_df):
     plt.show()
 
 def plot_params(x_vec, param_func):
-    t_vec = range(365)
+    t_vec = np.array(range(365)) * 24
     figure, axes = plt.subplots(3, 1)
     axes = iter(axes.T.flatten())
     axis = next(axes)
@@ -97,25 +97,25 @@ def prepare_model_df(prec_series, prec_inc):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_type', default='fused')
+    parser.add_argument('--dataset', default='fused')
     parser.add_argument('--prec_inc', type=int, default=500)
     parser.add_argument('--x_steps', type=int, default=30)
     parser.add_argument('--t_steps', type=int, default=30)
     parser.add_argument('--s_steps', type=int, default=1000)
-    parser.add_argument('--delta_s', type=int, default=0.02)
+    parser.add_argument('--delta_s', type=int, default=0.5)
     parser.add_argument('--calculate_model_df', action='store_true', default=False)
     parser.add_argument('--plot', action='store_true', default=False)
     args = parser.parse_args()
 
-    if args.data_type == 'fused':
+    if args.dataset == 'fused':
         prec_df, _, _ = prepare_df('data/precipitation', 'FusedData.csv', 'prec')
         prec_series = prec_df[FUSED_SERIES_KEY]
-    elif args.data_type == 'bom_daily':
+    elif args.dataset == 'bom_daily':
         prec_df = pd.read_csv(f'data_unfused/{BOM_DAILY_FILE}.csv')
         prec_df.index = pd.DatetimeIndex(prec_df['Date'])
         # prec_series = pd.Series(prec_df['Rain']).dropna().loc['2000-04-01':]
         prec_series = pd.Series(prec_df['Rain']).dropna().loc['2000-04-01':]
-    filename = f'data/precipitation/unami_2009_proc_delta_{args.prec_inc}.csv'
+    filename = f'data/precipitation/unami_2009_{args.dataset}_delta_{args.prec_inc}.csv'
     if args.calculate_model_df:
         model_df = prepare_model_df(prec_series, args.prec_inc)
         model_df.to_csv(filename)
@@ -140,10 +140,11 @@ def main():
     n = model_df.shape[0] - 1
     x_data = np.array(model_df['x'])
     s_data = np.array(model_df['s'])
-    # Data is uniform in time, so just implement with a sequence of integers representing the month
-    # Hence, period is just 12
-    t_data = np.array(range(n))
-    P = 12
+    model_df['t'] = pd.to_datetime(model_df['t'])
+    t_0 = model_df['t'][0]
+    t_data = np.array([(t - t_0).days * 24 for t in model_df['t']])
+    # t_data is in hours, so set period as one year accordingly
+    P = 24 * 365
     X_mats = {}
     beta_hats = {}
     param_info = {
@@ -164,7 +165,7 @@ def main():
                 x_pow = x_data[j] ** i
                 X_mat[j, (1 + 2*n_t) * i] = x_pow
                 for k in range(n_t):
-                    theta = 2*np.pi * t_data[j] * (k + 1) / P
+                    theta = 2*np.pi * (k + 1) * t_data[j] / P
                     X_mat[j, (1 + 2*n_t) * i + 2*k + 1] = x_pow * np.sin(theta)
                     X_mat[j, (1 + 2*n_t) * i + 2*k + 2] = x_pow * np.cos(theta)
         X_mats[param] = X_mat
@@ -174,20 +175,23 @@ def main():
     n = args.x_steps
     m = args.t_steps
     z = args.s_steps
-    t_data = np.array(range(m + 1))
+    # TODO: consider more constrained x-domain
+    # x_inf = x_data.min() + 1
+    # x_sup = x_data.max() - 1
     x_inf = x_data.min()
     x_sup = x_data.max()
     # s is in units of mm
     # t is in units of hours
     # x is in units of log(mm/h)
     delta_x = (x_sup - x_inf) / n
-    P = 24 * 365
     delta_t = P / m
     delta_s = args.delta_s
+    t_mesh = np.linspace(0, 24 * 365, m + 1)
+    x_mesh = np.linspace(x_inf, x_sup, n + 1)
+    s_mesh = np.linspace(0, z * delta_s, z + 1)
 
     def param_func(param, t, x=None):
-        # Input t is in units of days, so convert to hours
-        t = t * 24
+        # Input t should be in units of hours
         n_X, n_t, _ = param_info[param]
         X_vec = np.zeros((n_X + 1) * (1 + 2*n_t))
         for i in range(n_X + 1):
@@ -195,7 +199,7 @@ def main():
             x_pow = 1 if i == 0 else x ** i
             X_vec[(1 + 2*n_t) * i] = x_pow
             for k in range(n_t):
-                theta = 2*np.pi * t * (k + 1) / P
+                theta = 2*np.pi * (k + 1) * t / P
                 X_vec[(1 + 2*n_t) * i + 2*k + 1] = x_pow * np.sin(theta)
                 X_vec[(1 + 2*n_t) * i + 2*k + 2] = x_pow * np.cos(theta)
         return X_vec @ beta_hats[param]
@@ -218,19 +222,19 @@ def main():
     for k in range(n - 1):
         if k % 10 == 0:
             print(k, '/', n)
-        x_k = x_data[k]
-        x_km1 = x_data[k - 1] if k > 0 else x_inf
+        x_k = x_mesh[k]
+        x_km1 = x_mesh[k - 1] if k > 0 else x_inf
         x_km0p5 = (x_km1 + x_k) / 2
-        x_kp1 = x_data[k + 1] if k < n - 2 else x_sup
+        x_kp1 = x_mesh[k + 1] if k < n - 2 else x_sup
         x_kp0p5 = (x_k + x_kp1) / 2
         for j in range(m):
-            t = t_data[j + 1]
+            t = t_mesh[j + 1]
             pe_l = peclet_num(x_km0p5, t)
             p_l = np.exp(pe_l)
             pe_r = peclet_num(x_kp0p5, t)
             p_r = np.exp(-pe_r)
 
-            tp1 = t_data[j + 1]
+            tp1 = t_mesh[j + 1]
             pe_l_tp1 = peclet_num(x_km0p5, tp1)
             p_l_tp1 = np.exp(pe_l_tp1)
             pe_r_tp1 = peclet_num(x_kp0p5, tp1)
@@ -239,28 +243,28 @@ def main():
             # Contributions from phi du/ds term
             f = lambda x: 1 /_v(t, x)
             if k > 0:
-                G_mats[j][k, k - 1] = delta_x**2 / delta_s * f(x_km1) \
+                G_mats[j][k, k - 1] = -delta_x**2 / delta_s * f(x_km1) \
                     / (p_l + 1) / (p_l + 2)
                 M_mats[j][k, k - 1, 0] = G_mats[j][k, k - 1]
-            G_mats[j][k, k] = delta_x**2 / delta_s * f(x_k) \
+            G_mats[j][k, k] = -delta_x**2 / delta_s * f(x_k) \
                 * (1 / (p_l + 2) + 1 / (p_r + 2))
             M_mats[j][k, k, 0] = G_mats[j][k, k]
             if k < n - 2:
-                G_mats[j][k, k + 1] = delta_x**2 / delta_s * f(x_kp1) \
+                G_mats[j][k, k + 1] = -delta_x**2 / delta_s * f(x_kp1) \
                     / (p_r + 1) / (p_r + 2)
                 M_mats[j][k, k + 1, 0] = G_mats[j][k, k + 1]
 
             # Contributions from phi du/dt term
             f = lambda x: np.exp(-x) /_v(t, x)
             if k > 0:
-                H_mats[j][k, k - 1] = delta_x**2 / delta_t * f(x_km1) \
+                H_mats[j][k, k - 1] = -delta_x**2 / delta_t * f(x_km1) \
                     / (p_l_tp1 + 1) / (p_l_tp1 + 2)
                 M_mats[j][k, k - 1, 1] = H_mats[j][k, k - 1]
-            H_mats[j][k, k] = delta_x**2 / delta_t * f(x_k) \
+            H_mats[j][k, k] = -delta_x**2 / delta_t * f(x_k) \
                 * (1 / (p_l_tp1 + 2) + 1 / (p_r_tp1 + 2))
             M_mats[j][k, k, 1] = H_mats[j][k, k]
             if k < n - 2:
-                H_mats[j][k, k + 1] = delta_x**2 / delta_t * f(x_kp1) \
+                H_mats[j][k, k + 1] = -delta_x**2 / delta_t * f(x_kp1) \
                     / (p_r_tp1 + 1) / (p_r_tp1 + 2)
                 M_mats[j][k, k + 1, 1] = H_mats[j][k, k + 1]
 
@@ -306,13 +310,49 @@ def main():
                 A_mat[start : end, start + n - 1 : end + n - 1] = -H_mats[j + 1]
         # Periodic boundary condition
         A_mat[(m - 1)*(n - 1) : m*(n - 1), 0 : n - 1] = -H_mats[0]
-        if i == 0:
-            np.savetxt('A_mat.csv', A_mat, delimiter=',')
         u_vecs.append(spsolve(A_mat, b_vec))
-        if i == 5:
-            np.savetxt(f'u_{i+1}.csv', u_vecs[i+1].reshape((m, n - 1)), delimiter=',')
-        print(i, u_vecs[i+1].mean(), u_vecs[i+1].std(), u_vecs[i+1].sum())
+        print(i, u_vecs[i+1].mean(), u_vecs[i+1].std(), u_vecs[i+1].max(), u_vecs[i+1].min())
     print(f'Solving time: {datetime.now() - start_time}')
+
+    # TODO: investigate outputs more
+    u_array = np.stack(u_vecs, axis=0).reshape((z + 1, m, n - 1))
+    last_u = u_vecs[-1].reshape((m, n - 1))
+    
+    figure = plt.figure(figsize=plt.figaspect(0.5))
+    axis = figure.add_subplot(1, 2, 1, projection='3d')
+    X, S = np.meshgrid(x_mesh[1 : -1], s_mesh)
+    s_plot_step = 1
+    axis.plot_surface(X[::s_plot_step, :], S[::s_plot_step, :], u_array[::s_plot_step, 2, :],
+        rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+    axis.set_xlabel('x')
+    axis.set_ylabel('s')
+    axis.set_zlabel('u')
+
+    axis = figure.add_subplot(1, 2, 2, projection='3d')
+    X, T = np.meshgrid(x_mesh[1 : -1], t_mesh[1:] / 24)
+    axis.plot_surface(X, T, last_u, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+    axis.set_xlabel('x')
+    axis.set_ylabel('t')
+    axis.set_zlabel('u')
+    plt.show()
+
+    if args.plot:
+        figure, axes = plt.subplots(2, 1)
+        axes = iter(axes.flatten())
+        axis = next(axes)
+        axis.plot(last_u[0, :], 'b', label='t = 0')
+        axis.plot(last_u[10, :], 'r', label='t = 10')
+        axis.plot(last_u[-1, :], 'g', label='t = end')
+        axis.set_xlabel('x')
+        axis.legend()
+        axis = next(axes)
+        axis.plot(last_u[:, 0], 'b', label='x = x_inf')
+        axis.plot(last_u[:, 8], 'r', label='x index = 8')
+        axis.plot(last_u[:, 16], 'g', label='x index = 16')
+        axis.plot(last_u[:, -1], 'm', label='x = x_sup')
+        axis.set_xlabel('t')
+        axis.legend()
+        plt.show()
     
 if __name__ == '__main__':
     main()
