@@ -30,13 +30,13 @@ def prepare_model_df(prec_series, prec_inc, ds_period=None):
             t_delta = 24 * (times[i_prev + 1] - times[i_prev]).days / inc_jumps
         else:
             t_delta = 24 * (times[i] - times[i_prev]).days
-        # Used to prevent consecutive x-values being equal
-        t_delta += np.abs(np.random.normal(0, 6))
         ######################################################
         # print(times[i].strftime('%Y_%m_%d'), i, i - i_prev, round(s), round(cum_sums[i_prev]),
         #     int((s - cum_sums[i_prev]) // prec_inc), round(t_delta, 2))
         ######################################################
-        x = np.log(prec_inc / t_delta)
+        # Add a small amount of noise to prevent consecutive x-values being equal, which
+        # causes log of zero in the parameter estimation
+        x = np.log(prec_inc / t_delta) + np.random.normal(0, 0.1)
         model_df_values.append((s, times[i], x, t_delta))
     model_df = pd.DataFrame(model_df_values)
     model_df.columns = ['s', 't', 'x', 't_delta']

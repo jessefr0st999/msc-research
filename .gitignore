@@ -2,10 +2,12 @@
 .pgdata
 __pycache__
 data
+data_unfused
 outputs
 basemap-*
 geckodriver*
 images/*
 *.geojson
 *.pkl
+*.csv
 .ipynb_checkpoints
