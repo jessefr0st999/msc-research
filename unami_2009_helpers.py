@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta
 from math import floor
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 import pandas as pd
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-def prepare_model_df(prec_series, prec_inc):
+def prepare_model_df(prec_series, prec_inc, ds_period=None):
     cum_sums = prec_series.cumsum()
     times = prec_series.index
     # Calculate values of the temporal variable X
@@ -39,13 +40,16 @@ def prepare_model_df(prec_series, prec_inc):
         model_df_values.append((s, times[i], x, t_delta))
     model_df = pd.DataFrame(model_df_values)
     model_df.columns = ['s', 't', 'x', 't_delta']
+    if ds_period:
+        x_decomp = seasonal_decompose(model_df['x'], model='additive', period=ds_period)
+        model_df['x'] = model_df['x'] - x_decomp.seasonal
     return model_df
 
 
-# Estimate parameter functions by estimating least squares coefficients for fitting the
+# Estimate parameter functions by estimating least squares coefficients for fitti ng the
 # functions as polynomials in x multiplied by sin/cos in t
 # Number of least squares coefficients estimated for each parameter is (n_X + 1) * (1 + 2*n_t)
-def estimate_params(model_df, period):
+def estimate_params(model_df, period, param_info=None):
     n = model_df.shape[0] - 1
     x_data = np.array(model_df['x'])
     s_data = np.array(model_df['s'])
@@ -61,14 +65,21 @@ def estimate_params(model_df, period):
         return np.log((x_p - x)**2 / (s_p - s))
     def kappa_f_hat(x, x_p, s, s_p, beta):
         return np.log(np.abs(x_p - x) / np.abs(beta - x) / (s_p - s))
-    param_info = {
-        'beta': (0, 3, beta_f_hat),
-        'psi': (2, 2, psi_f_hat),
-        'kappa': (0, 2, kappa_f_hat),
+    param_f_hats = {
+        'beta': beta_f_hat,
+        'psi': psi_f_hat,
+        'kappa': kappa_f_hat,
     }
-    for param, (n_X, n_t, f_hat) in param_info.items():
+    if param_info is None:
+        param_info = {
+            'beta': (0, 3),
+            'psi': (2, 2),
+            'kappa': (0, 2),
+        }
+    for param, (n_X, n_t) in param_info.items():
         X_mat = np.zeros((n, (n_X + 1) * (1 + 2*n_t)))
         y_vec = np.zeros(n)
+        f_hat = param_f_hats[param]
         for j in range(n):
             if param == 'kappa':
                 y_vec[j] = f_hat(x_data[j], x_data[j + 1], s_data[j], s_data[j + 1],
@@ -87,7 +98,7 @@ def estimate_params(model_df, period):
 
     def param_func(param, t, x=None):
         # Input t should be in units of hours
-        n_X, n_t, _ = param_info[param]
+        n_X, n_t = param_info[param]
         X_vec = np.zeros((n_X + 1) * (1 + 2*n_t))
         for i in range(n_X + 1):
             # Allow x to be undefined for beta and kappa
@@ -102,7 +113,7 @@ def estimate_params(model_df, period):
     return param_func
 
 
-def plot_data(model_df):
+def plot_data(model_df, prec_series):
     # Plot x vs time of year
     figure, axis = plt.subplots(1, 1)
     years = list(range(model_df['t'].iloc[0].year, model_df['t'].iloc[-1].year + 1))
@@ -119,16 +130,21 @@ def plot_data(model_df):
     axis.set_ylabel('x')
     plt.show()
 
-    figure, axes = plt.subplots(3, 1)
-    axes = iter(axes.T.flatten())
+    figure, axes = plt.subplots(4, 1)
+    axes = iter(axes.flatten())
     axis = next(axes)
-    axis.plot(model_df['t'], model_df['s'], 'bo-')
+    axis.plot(prec_series, 'mo-')
     axis.set_xlabel('t')
-    axis.set_ylabel('s')
+    axis.set_ylabel('prec')
     
     axis = next(axes)
     axis.plot(model_df['t'], model_df['x'], 'ro-')
     axis.set_xlabel('t')
+    axis.set_ylabel('x')
+
+    axis = next(axes)
+    axis.plot(model_df['s'], model_df['x'], 'ko-')
+    axis.set_xlabel('s')
     axis.set_ylabel('x')
 
     axis = next(axes)
@@ -138,8 +154,7 @@ def plot_data(model_df):
     plt.show()
 
 
-def plot_params(x_vec, param_func):
-    t_vec = np.array(range(365))
+def plot_params(x_vec, t_vec, param_func):
     figure, axes = plt.subplots(2, 1)
     axes = iter(axes.T.flatten())
     axis = next(axes)
@@ -170,7 +185,8 @@ def plot_params(x_vec, param_func):
     plt.show()
 
 
-def build_scheme(param_func, x_data, t_mesh, n, m, delta_s, delta_t, fwd_diff=False):
+def build_scheme(param_func, x_data, t_mesh, n, m, delta_s, delta_t,
+        non_periodic=False, fwd_diff=False):
     # TODO: consider a different x-domain
     x_inf = x_data.min()
     x_sup = x_data.max()
@@ -239,7 +255,10 @@ def build_scheme(param_func, x_data, t_mesh, n, m, delta_s, delta_t, fwd_diff=Fa
 
     G_mats = [mat[:, :, 0] for mat in M_mats]
     H_mats = [mat[:, :, 1] for mat in M_mats]
-    M_mats = [mat.sum(axis=2) if fwd_diff else mat[:, :, np.r_[:2, 3]].sum(axis=2) for mat in M_mats]
+    M_mats = [mat.sum(axis=2) if fwd_diff or non_periodic \
+        else mat[:, :, np.r_[0, 2:4]].sum(axis=2) for mat in M_mats]
+    if non_periodic:
+        return M_mats, G_mats, H_mats
 
     # Create LHS matrix
     A_mat = np.zeros((m * (n - 1), m * (n - 1)))
@@ -322,7 +341,7 @@ def build_scheme_time_indep(param_func, x_data, n, delta_s, _time):
     return M_mat, G_mat
     
 
-def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func):
+def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func, np_start_date=None):
     x_inf = x_data.min()
     x_sup = x_data.max()
     x_mesh = np.linspace(x_inf, x_sup, n + 1)
@@ -330,11 +349,12 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func)
     print('x_inf, x_sup, delta_x, delta_t:', x_inf, x_sup, (x_sup - x_inf) / n, delta_t)
     
     # TODO: plot x-boundaries
-    figure, axes = plt.subplots(3, 4)
+    figure, axes = plt.subplots(4, 5) if np_start_date else plt.subplots(3, 4)
     axes = iter(axes.flatten())
     u_min = np.Inf
     u_max = -np.Inf
-    t_plot_indices = [floor(i * m / 12) for i in range(12)]
+    num_plots = 20 if np_start_date else 12
+    t_plot_indices = [floor(i * m / num_plots) for i in range(num_plots)]
     for i, plot_t in enumerate(t_plot_indices):
         u_slice = u_array[:, plot_t, :]
         u_min = np.min([u_min, u_slice.min(axis=(0, 1))])
@@ -347,7 +367,9 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func)
         plt.colorbar(cmap)
         axis.set_xlabel('s')
         axis.set_ylabel('x')
-        axis.set_title((datetime(2000, 1, 1) + timedelta(days=plot_t * delta_t / 24)).strftime('%b %d'))
+        date_format = '%b %d %Y' if np_start_date else '%b %d'
+        start_date = np_start_date or datetime(2000, 1, 1)
+        axis.set_title((start_date + timedelta(days=plot_t * delta_t / 24)).strftime(date_format))
         beta = param_func('beta', plot_t * delta_t)
         axis.plot(s_mesh, [beta for _ in s_mesh], 'r-')
     plt.show()
@@ -384,6 +406,20 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func)
     axis.set_ylabel('u')
     axis.legend()
     plt.show()
+
+    if np_start_date:
+        figure, axis = plt.subplots(1)
+        j_inf = u_array.max(axis=(0, 2))
+        j_2 = np.zeros(m)
+        for j in range(m):
+            j_2[j] = (u_array[:, j, :] ** 2).sum(axis=(0, 1))
+        j_2 /= (n - 1) * (z + 1)
+        axis.plot(t_mesh[1:], j_inf, 'r', label='j_inf')
+        axis.plot(t_mesh[1:], j_2, 'b', label='j_2')
+        axis.set_xlabel('t')
+        axis.set_ylabel('u')
+        axis.legend()
+        plt.show()
     
 
 def plot_results_time_indep(u_arrays, x_data, n, z, delta_s, param_func, title=None):
