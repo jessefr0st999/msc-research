@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from math import floor
 from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.tsatools import detrend
 
 import pandas as pd
 import numpy as np
@@ -46,16 +47,37 @@ def prepare_model_df(prec_series, prec_inc, ds_period=None):
     return model_df
 
 
+def deseasonalise_x(model_df, param_func):
+    t0 = datetime(2000, 1, 1)
+    def x_periodic(t):
+        return param_func('beta', 24 * (t - t0).days)
+    x_seasonal = model_df['t'].apply(x_periodic)
+    x_deseasonalised = pd.Series(model_df['x'] - x_seasonal)
+    x_deseasonalised.index = model_df['t']
+    return x_deseasonalised
+
+
+def detrend_x(x_series, rolling=None, polynomial=1):
+    if rolling:
+        x_rolling_mean = x_series.rolling(window=rolling, center=True).mean().fillna(0)
+        return pd.Series(x_series - x_rolling_mean, index=x_series.index)
+    return pd.Series(detrend(x_series, order=polynomial), index=x_series.index)
+
+
 # Estimate parameter functions by estimating least squares coefficients for fitti ng the
 # functions as polynomials in x multiplied by sin/cos in t
 # Number of least squares coefficients estimated for each parameter is (n_X + 1) * (1 + 2*n_t)
-def estimate_params(model_df, period, param_info=None):
+def estimate_params(model_df, period, shift_zero=False, param_info=None,
+        trend_polynomial=None):
     n = model_df.shape[0] - 1
     x_data = np.array(model_df['x'])
     s_data = np.array(model_df['s'])
     model_df['t'] = pd.to_datetime(model_df['t'])
-    # Zero for time at 1 January
-    t_0 = datetime(model_df['t'][0].year, 1, 1)
+    if shift_zero:
+        # Zero for time at 1 January
+        t_0 = datetime(model_df['t'][0].year, 1, 1)
+    else:
+        t_0 = model_df['t'][0]
     t_data = np.array([(t - t_0).days * 24 for t in model_df['t']])
     X_mats = {}
     beta_hats = {}
@@ -96,7 +118,7 @@ def estimate_params(model_df, period, param_info=None):
         X_mats[param] = X_mat
         beta_hats[param] = np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T @ y_vec
 
-    def param_func(param, t, x=None):
+    def _param_func(param, t, x=None):
         # Input t should be in units of hours
         n_X, n_t = param_info[param]
         X_vec = np.zeros((n_X + 1) * (1 + 2*n_t))
@@ -109,11 +131,24 @@ def estimate_params(model_df, period, param_info=None):
                 X_vec[(1 + 2*n_t) * i + 2*k + 1] = x_pow * np.sin(theta)
                 X_vec[(1 + 2*n_t) * i + 2*k + 2] = x_pow * np.cos(theta)
         return X_vec @ beta_hats[param]
-    
-    return param_func
+
+    if trend_polynomial:
+        # TODO: Handle this for quadratic and moving average trends
+        x_deseasonalised = deseasonalise_x(model_df, _param_func)
+        x_detrended = detrend_x(x_deseasonalised, polynomial=1)
+        trend = x_deseasonalised - x_detrended
+        trend_slope = (trend.iloc[1] - trend.iloc[0]) / \
+            (24 * (trend.index[1] - trend.index[0]).days)
+        def _trend_param_func(param, t, x=None):
+            if param == 'beta':
+                return _param_func(param, t, x) - trend_slope * t
+            return _param_func(param, t, x)
+        return _trend_param_func
+
+    return _param_func
 
 
-def plot_data(model_df, prec_series):
+def plot_data(model_df, prec_series, x_inf, x_sup):
     # Plot x vs time of year
     figure, axis = plt.subplots(1, 1)
     years = list(range(model_df['t'].iloc[0].year, model_df['t'].iloc[-1].year + 1))
@@ -139,11 +174,15 @@ def plot_data(model_df, prec_series):
     
     axis = next(axes)
     axis.plot(model_df['t'], model_df['x'], 'ro-')
+    axis.plot(model_df['t'], model_df['x'] * 0 + x_sup, 'c-')
+    axis.plot(model_df['t'], model_df['x'] * 0 + x_inf, 'c-')
     axis.set_xlabel('t')
     axis.set_ylabel('x')
 
     axis = next(axes)
     axis.plot(model_df['s'], model_df['x'], 'ko-')
+    axis.plot(model_df['s'], model_df['x'] * 0 + x_sup, 'c-')
+    axis.plot(model_df['s'], model_df['x'] * 0 + x_inf, 'c-')
     axis.set_xlabel('s')
     axis.set_ylabel('x')
 
@@ -154,28 +193,43 @@ def plot_data(model_df, prec_series):
     plt.show()
 
 
-def plot_params(x_vec, t_vec, param_func):
-    figure, axes = plt.subplots(2, 1)
+def plot_params(model_df, t_mesh, param_func):
+    x_inf = np.min(model_df['x'])
+    x_median = np.median(model_df['x'])
+    x_sup = np.max(model_df['x'])
+
+    figure, axes = plt.subplots(3, 1)
     axes = iter(axes.T.flatten())
     axis = next(axes)
-    axis.plot(t_vec, [param_func('beta', t * 24) for t in t_vec], 'bo-')
+    axis.plot(t_mesh, [param_func('beta', i * 24) for i, t in enumerate(t_mesh)], 'bo-')
     axis.set_xlabel('t')
     axis.set_ylabel('beta')
 
     axis = next(axes)
-    axis.plot(t_vec, [param_func('kappa', t * 24) for t in t_vec], 'go-')
+    axis.plot(t_mesh, [param_func('kappa', i * 24) for i, t in enumerate(t_mesh)], 'go-')
     axis.set_xlabel('t')
     axis.set_ylabel('kappa = log(K)')
+
+    axis = next(axes)
+    axis.plot(t_mesh, [param_func('psi', i * 24, x_inf) for i, t in enumerate(t_mesh)],
+        'mo-', label='at x_inf')
+    axis.plot(t_mesh, [param_func('psi', i * 24, x_median) for i, t in enumerate(t_mesh)],
+        'ko-', label='at x_median')
+    axis.plot(t_mesh, [param_func('psi', i * 24, x_sup) for i, t in enumerate(t_mesh)],
+        'co-', label='at x_sup')
+    axis.set_xlabel('t')
+    axis.set_ylabel('psi = log(v)')
+    axis.legend()
     plt.show()
     
     figure, axis = plt.subplots(1)
-    _x_vec = np.linspace(x_vec.min(), x_vec.max(), 201)
-    _psi = lambda t, x: param_func('psi', t * 24, x)
-    X, T = np.meshgrid(_x_vec, t_vec)
-    U = T * 0
-    for i, t in enumerate(t_vec):
-        for j, x in enumerate(_x_vec):
-            U[i, j] = _psi(t, x)
+    x_mesh = np.linspace(model_df['x'].min(), model_df['x'].max(), 201)
+    _psi = lambda i, x: param_func('psi', i * 24, x)
+    X, T = np.meshgrid(x_mesh, t_mesh)
+    U = X * 0
+    for i, t in enumerate(t_mesh):
+        for j, x in enumerate(x_mesh):
+            U[i, j] = _psi(i, x)
     cmap = axis.pcolormesh(T, X, U, cmap='viridis',
         vmin=U.min().min(), vmax=U.max().max())
     plt.colorbar(cmap)
@@ -185,11 +239,8 @@ def plot_params(x_vec, t_vec, param_func):
     plt.show()
 
 
-def build_scheme(param_func, x_data, t_mesh, n, m, delta_s, delta_t,
-        non_periodic=False, fwd_diff=False):
-    # TODO: consider a different x-domain
-    x_inf = x_data.min()
-    x_sup = x_data.max()
+def build_scheme(param_func, t_mesh, n, m, delta_s, delta_t, non_periodic=False,
+        fwd_diff=False, x_inf=None, x_sup=None, side=None):
     delta_x = (x_sup - x_inf) / n
     x_mesh = np.linspace(x_inf, x_sup, n + 1)
 
@@ -202,65 +253,101 @@ def build_scheme(param_func, x_data, t_mesh, n, m, delta_s, delta_t,
     def peclet_num(x, t):
         return _K(t) * (_beta(t) - x) * delta_x / _v(t, x)
     
-    M_mats = [np.zeros((n - 1, n - 1, 4)) for _ in range(m)]
+    M_mats = [np.zeros((n + 1, n + 1, 4)) for _ in range(m)]
     print('Setting up linear systems...')
-    for k in range(n - 1):
+    for k in range(n + 1):
+        x_km1 = x_mesh[k - 1] if k > 0 else None
         x_k = x_mesh[k]
-        x_km1 = x_mesh[k - 1] if k > 0 else x_inf
-        x_km0p5 = (x_km1 + x_k) / 2
-        x_kp1 = x_mesh[k + 1] if k < n - 2 else x_sup
-        x_kp0p5 = (x_k + x_kp1) / 2
+        x_kp1 = x_mesh[k + 1] if k < n else None
+        x_km0p5 = (x_km1 + x_k) / 2 if k > 0 else None
+        x_kp0p5 = (x_k + x_kp1) / 2 if k < n else None
         for j in range(m):
             t = t_mesh[j]
-            pe_l = peclet_num(x_km0p5, t)
-            p_l = np.exp(pe_l)
-            pe_r = peclet_num(x_kp0p5, t)
-            p_r = np.exp(-pe_r)
+            pe_l = peclet_num(x_km0p5, t) if k > 0 else None
+            pe_r = peclet_num(x_kp0p5, t) if k < n else None
+            p_l = np.exp(pe_l) if k > 0 else None
+            p_r = np.exp(-pe_r) if k < n else None
 
             # Contributions from phi du/ds term
             f = lambda _x, _t: 1 / _v(_t, _x)
+            if k == 0:
+                M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_k, t) \
+                    / (p_r + 2)
+            elif k == n:
+                M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_k, t) \
+                    / (p_l + 2)
+            else:
+                M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_k, t) \
+                    * (1 / (p_l + 2) + 1 / (p_r + 2))
             if k > 0:
                 M_mats[j][k, k - 1, 0] = -delta_x**2 / delta_s * f(x_km1, t) \
                     / (p_l + 1) / (p_l + 2)
-            M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_k, t) \
-                * (1 / (p_l + 2) + 1 / (p_r + 2))
-            if k < n - 2:
+            if k < n:
                 M_mats[j][k, k + 1, 0] = -delta_x**2 / delta_s * f(x_kp1, t) \
                     / (p_r + 1) / (p_r + 2)
 
             # Contributions from phi du/dt term
             f = lambda _x, _t: np.exp(-_x) / _v(_t, _x)
+            # TODO: why does this work??? should be +1 if non-periodic
+            sign = -1 if non_periodic else -1
+            if k == 0:
+                M_mats[j][k, k, 1] = sign * delta_x**2 / delta_t * f(x_k, t) \
+                    / (p_r + 2)
+            elif k == n:
+                M_mats[j][k, k, 1] = sign * delta_x**2 / delta_t * f(x_k, t) \
+                    / (p_l + 2)
+            else:
+                M_mats[j][k, k, 1] = sign * delta_x**2 / delta_t * f(x_k, t) \
+                    * (1 / (p_l + 2) + 1 / (p_r + 2))
             if k > 0:
-                M_mats[j][k, k - 1, 1] = -delta_x**2 / delta_t * f(x_km1, t) \
+                M_mats[j][k, k - 1, 1] = sign * delta_x**2 / delta_t * f(x_km1, t) \
                     / (p_l + 1) / (p_l + 2)
-            M_mats[j][k, k, 1] = -delta_x**2 / delta_t * f(x_k, t) \
-                * (1 / (p_l + 2) + 1 / (p_r + 2))
-            if k < n - 2:
-                M_mats[j][k, k + 1, 1] = -delta_x**2 / delta_t * f(x_kp1, t) \
+            if k < n:
+                M_mats[j][k, k + 1, 1] = sign * delta_x**2 / delta_t * f(x_kp1, t) \
                     / (p_r + 1) / (p_r + 2)
 
             # Contributions from phi du/dx term
+            if k == 0:
+                M_mats[j][k, k, 2] = -pe_r / (p_r + 1)
+            elif k == n:
+                M_mats[j][k, k, 2] = pe_l / (p_l + 1)
+            else:
+                M_mats[j][k, k, 2] = pe_l / (p_l + 1) - pe_r / (p_r + 1)
             if k > 0:
                 M_mats[j][k, k - 1, 2] = -pe_l / (p_l + 1)
-            M_mats[j][k, k, 2] = pe_l / (p_l + 1) - pe_r / (p_r + 1)
-            if k < n - 2:
+            if k < n:
                 M_mats[j][k, k + 1, 2] = pe_r / (p_r + 1)
 
             # Contributions from dphi/dx du/dx term
+            if k == 0 or k == n:
+                M_mats[j][k, k, 3] = -1/2
+            else:
+                M_mats[j][k, k, 3] = -1
             if k > 0:
                 M_mats[j][k, k - 1, 3] = 1/2
-            M_mats[j][k, k, 3] = -1
-            if k < n - 2:
+            if k < n:
                 M_mats[j][k, k + 1, 3] = 1/2
 
-    G_mats = [mat[:, :, 0] for mat in M_mats]
-    H_mats = [mat[:, :, 1] for mat in M_mats]
-    M_mats = [mat.sum(axis=2) if fwd_diff or non_periodic \
-        else mat[:, :, np.r_[0, 2:4]].sum(axis=2) for mat in M_mats]
+    # For one-sided, there is a Dirichlet BC at the given end and a Neumann
+    # BC at the other end, so keep the other end's term in the scheme
+    # For two-sided, both ends have Dirichlet BCs, so remove both ends' terms
+    sliced_M_mats = []
+    for mat in M_mats:
+        if side == 'left':
+            sliced_M_mats.append(mat[1:, 1:, :])
+        elif side == 'right':
+            sliced_M_mats.append(mat[:n, :n, :])
+        else:
+            sliced_M_mats.append(mat[1 : n, 1 : n, :])
+    G_mats = [mat[:, :, 0] for mat in sliced_M_mats]
+    H_mats = [mat[:, :, 1] for mat in sliced_M_mats]
+    sliced_M_mats = [mat.sum(axis=2) if fwd_diff or non_periodic \
+        else mat[:, :, np.r_[0, 2:4]].sum(axis=2) for mat in sliced_M_mats]
     if non_periodic:
-        return M_mats, G_mats, H_mats
+        return sliced_M_mats, G_mats, H_mats
 
     # Create LHS matrix
+    # TODO: handle one-sided
     A_mat = np.zeros((m * (n - 1), m * (n - 1)))
     for j in range(m):
         start = j*(n - 1)
@@ -341,37 +428,83 @@ def build_scheme_time_indep(param_func, x_data, n, delta_s, _time):
     return M_mat, G_mat
     
 
-def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func, np_start_date=None):
-    x_inf = x_data.min()
-    x_sup = x_data.max()
-    x_mesh = np.linspace(x_inf, x_sup, n + 1)
+def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
+        start_date=None, non_periodic=False, x_inf=None, x_sup=None, title=None,
+        side=None):
+    u_last_cycle = u_array if non_periodic else u_array[:, -m:, :]
     s_mesh = np.linspace(0, z * delta_s, z + 1)
-    print('x_inf, x_sup, delta_x, delta_t:', x_inf, x_sup, (x_sup - x_inf) / n, delta_t)
+    x_inf = x_inf or x_data.min()
+    x_sup = x_sup or x_data.max()
+    x_mesh = np.linspace(x_inf, x_sup, n + 1)
+    if side:
+        x_slice = x_mesh[1:] if side == 'left' else x_mesh[:-1]
+    else:
+        x_slice = x_mesh[1 : -1]
+    delta_x = (x_sup - x_inf) / n
+    print('x_min, x_inf, x_sup, x_max, delta_x, delta_t:',
+          x_data.min(), x_inf, x_sup, x_data.max(), delta_x, delta_t)
+    _start_date = start_date if non_periodic else datetime(2000, 1, 1)
     
     # TODO: plot x-boundaries
-    figure, axes = plt.subplots(4, 5) if np_start_date else plt.subplots(3, 4)
+    figure, axes = plt.subplots(4, 5) if non_periodic else plt.subplots(3, 4)
     axes = iter(axes.flatten())
     u_min = np.Inf
     u_max = -np.Inf
-    num_plots = 20 if np_start_date else 12
+    num_plots = 20 if non_periodic else 12
     t_plot_indices = [floor(i * m / num_plots) for i in range(num_plots)]
-    for i, plot_t in enumerate(t_plot_indices):
-        u_slice = u_array[:, plot_t, :]
+    for j in t_plot_indices:
+        u_slice = u_last_cycle[:, j, :]
         u_min = np.min([u_min, u_slice.min(axis=(0, 1))])
         u_max = np.max([u_max, u_slice.max(axis=(0, 1))])
-    for i, plot_t in enumerate(t_plot_indices):
+    for j in t_plot_indices:
         axis = next(axes)
-        X, S = np.meshgrid(x_mesh[1 : -1], s_mesh)
-        cmap = axis.pcolormesh(S, X, u_array[:, plot_t, :], cmap='viridis',
+        X, S = np.meshgrid(x_slice, s_mesh)
+        cmap = axis.pcolormesh(S, X, u_last_cycle[:, j, :], cmap='viridis',
             vmin=u_min, vmax=u_max)
         plt.colorbar(cmap)
         axis.set_xlabel('s')
         axis.set_ylabel('x')
-        date_format = '%b %d %Y' if np_start_date else '%b %d'
-        start_date = np_start_date or datetime(2000, 1, 1)
-        axis.set_title((start_date + timedelta(days=plot_t * delta_t / 24)).strftime(date_format))
-        beta = param_func('beta', plot_t * delta_t)
+        date_title = (_start_date + timedelta(days=j * delta_t / 24)).strftime(
+            '%b %d %Y' if non_periodic else '%b %d')
+        axis.set_title(f'{title}: {date_title}' if title else date_title)
+        beta = param_func('beta', j * delta_t)
         axis.plot(s_mesh, [beta for _ in s_mesh], 'r-')
+    plt.show()
+
+    t_plot_indices = [floor(i * m / 4) for i in range(4)]
+    x_plot_indices = [floor(i * n / 5) for i in range(1, 5)]
+    max_prob = np.zeros((4, 4))
+    mean = np.zeros((4, 4))
+    median = np.zeros((4, 4))
+    mode = np.zeros((4, 4))
+    colours = ['g', 'b', 'm', 'r']
+    figure, axes = plt.subplots(2, 4)
+    axes = iter(axes.T.flatten())
+    for t_i, j in enumerate(t_plot_indices):
+        date_title = (_start_date + timedelta(days=j * delta_t / 24)).strftime('%b %d')
+        axis = next(axes)
+        cdfs = {}
+        for x_i, k in enumerate(x_plot_indices):
+            colour = colours[x_i]
+            cdfs[k] = 1 - u_last_cycle[:, j, k]
+            axis.plot(s_mesh, cdfs[k], colour, label=f'x = {x_inf + k * delta_x}')
+            max_prob[t_i, x_i] = cdfs[k][-1]
+            median[t_i, x_i] = None if cdfs[k][-1] < 0.5 else \
+                np.argwhere(cdfs[k] >= 0.5)[0, 0] * delta_s
+        axis.set_title(f'cdf: t = {date_title}')
+        axis.legend()
+
+        axis = next(axes)
+        for x_i, k in enumerate(x_plot_indices):
+            colour = colours[x_i]
+            pdf = [(cdfs[k][i + 1] - cdfs[k][i]) / delta_s for i in range(len(cdfs[k]) - 1)]
+            axis.plot(s_mesh[:-1], pdf, colour, label=f'x = {x_inf + k * delta_x}')
+            mode[t_i, x_i] = np.argmax(pdf) * delta_s
+            mean[t_i, x_i] = None if cdfs[k][-1] == 0 else \
+                np.sum([s_mesh[i] * p * delta_s / cdfs[k][-1] for i, p in enumerate(pdf)])
+        axis.set_xlabel('s')
+        axis.set_title(f'pdf: t = {date_title}')
+        axis.legend()
     plt.show()
 
     figure, axes = plt.subplots(3, 4)
@@ -385,8 +518,9 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
         u_max = np.max([u_max, u_slice.max(axis=(0, 1))])
     for i, plot_s in enumerate(s_plot_indices):
         axis = next(axes)
-        X, T = np.meshgrid(x_mesh[1 : -1], t_mesh[1:] / 24)
-        cmap = axis.pcolormesh(T, X, u_array[plot_s, :, :], cmap='viridis', vmin=u_min, vmax=u_max)
+        X, T = np.meshgrid(x_slice, t_mesh[1:] / 24)
+        cmap = axis.pcolormesh(T, X, u_array[plot_s, :, :], cmap='viridis',
+            vmin=u_min, vmax=u_max)
         plt.colorbar(cmap)
         axis.set_xlabel('t')
         axis.set_ylabel('x')
@@ -398,7 +532,7 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
     j_inf = u_array.max(axis=(1, 2))
     j_2 = np.zeros(z + 1)
     for i in range(z + 1):
-        j_2[i] = (u_array[i, :, :] ** 2).sum(axis=(0, 1))
+        j_2[i] = (u_last_cycle[i, :, :] ** 2).sum(axis=(0, 1))
     j_2 /= (n - 1) * m
     axis.plot(s_mesh, j_inf, 'r', label='j_inf')
     axis.plot(s_mesh, j_2, 'b', label='j_2')
@@ -407,19 +541,25 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
     axis.legend()
     plt.show()
 
-    if np_start_date:
-        figure, axis = plt.subplots(1)
-        j_inf = u_array.max(axis=(0, 2))
-        j_2 = np.zeros(m)
-        for j in range(m):
-            j_2[j] = (u_array[:, j, :] ** 2).sum(axis=(0, 1))
-        j_2 /= (n - 1) * (z + 1)
-        axis.plot(t_mesh[1:], j_inf, 'r', label='j_inf')
-        axis.plot(t_mesh[1:], j_2, 'b', label='j_2')
-        axis.set_xlabel('t')
-        axis.set_ylabel('u')
-        axis.legend()
-        plt.show()
+    figure, axes = plt.subplots(1, 2)
+    axes = iter(axes.flatten())
+    axis = next(axes)
+    j_inf = u_array.max(axis=(0, 2))
+    j_2 = np.zeros(len(t_mesh) - 1)
+    for j in range(len(t_mesh) - 1):
+        j_2[j] = (u_array[:, j, :] ** 2).sum(axis=(0, 1))
+    j_2 /= (n - 1) * (z + 1)
+    axis.plot(t_mesh[1:], j_inf, 'r', label='j_inf')
+    axis.plot(t_mesh[1:], j_2, 'b', label='j_2')
+    axis.set_xlabel('t')
+    axis.set_ylabel('u')
+    axis.legend()
+    
+    axis = next(axes)
+    axis.plot([param_func('beta', t) for t in t_mesh[1:]], j_2, 'b')
+    axis.set_xlabel('beta')
+    axis.set_ylabel('j_2')
+    plt.show()
     
 
 def plot_results_time_indep(u_arrays, x_data, n, z, delta_s, param_func, title=None):
@@ -485,6 +625,24 @@ def plot_results_time_indep(u_arrays, x_data, n, z, delta_s, param_func, title=N
         axis.set_title(build_title(t))
         axis.legend()
     plt.show()
+
+EXTREME_LOWER_QUANTILES = pd.read_csv('x_lower_quantiles.csv', index_col=0)
+EXTREME_UPPER_QUANTILES = pd.read_csv('x_upper_quantiles.csv', index_col=0)
+def get_x_domain(x_series, shrink_x_proportion, shrink_x_quantile, loc):
+    if shrink_x_proportion:
+        shrinkage = (x_series.max() - x_series.min()) / shrink_x_proportion
+        x_sup = x_series.max() - shrinkage
+        x_inf = x_series.min() + shrinkage
+    elif shrink_x_quantile:
+        x_sup = np.quantile(x_series, 1 - shrink_x_quantile)
+        x_inf = np.quantile(x_series, shrink_x_quantile)
+    elif loc:
+        x_sup = np.quantile(x_series, EXTREME_UPPER_QUANTILES.loc[str(loc)][0])
+        x_inf = np.quantile(x_series, EXTREME_LOWER_QUANTILES.loc[str(loc)][0])
+    else:
+        x_sup = x_series.max()
+        x_inf = x_series.min()
+    return x_inf, x_sup
 
 
 # def phi(x, t, k):

@@ -4,6 +4,7 @@ __pycache__
 data
 data_unfused
 outputs
+unami_results
 basemap-*
 geckodriver*
 images/*
