@@ -48,7 +48,6 @@ def main():
     parser.add_argument('--s_steps', type=int, default=100)
     parser.add_argument('--num_samples', type=int, default=None)
     parser.add_argument('--delta_s', type=float, default=10)
-    parser.add_argument('--use_existing', action='store_true', default=False)
     parser.add_argument('--plot', action='store_true', default=False)
     parser.add_argument('--np_params', action='store_true', default=False) # TODO: implement
     parser.add_argument('--np_bcs', action='store_true', default=False)
@@ -56,6 +55,7 @@ def main():
     parser.add_argument('--shrink_x_quantile', type=float, default=None)
     parser.add_argument('--shrink_x_mixed', action='store_true', default=False)
     parser.add_argument('--year_cycles', type=int, default=1)
+    parser.add_argument('--side', default=None)
     args = parser.parse_args()
     
     full_loc_list = []
@@ -124,12 +124,15 @@ def main():
     loc_list = []
     # Slice the DE solution at evenly-spaced times throughout the year
     t_indices = [floor(i * m / 12) for i in range(12)]
-    # Sample with x close to x_inf, middle and close to x_sup
+    # Sample with various values of x
     x_indices = [
+        floor(n / 2),
+        floor(4*n / 5),
+        floor(9*n / 10),
+    ] if args.side == 'right' else [
         floor(n / 10),
         floor(n / 5),
         floor(n / 2),
-        # floor(9*n / 10),
     ]
     if args.read_folder:
         calculated_locations = []
@@ -174,7 +177,7 @@ def main():
         x_inf, x_sup = get_x_domain(model_df['x'], args.shrink_x_proportion,
             args.shrink_x_quantile, loc if args.shrink_x_mixed else None)
         scheme_output = build_scheme(param_func, t_mesh, n, m, args.delta_s,
-            delta_t, args.np_bcs, x_inf=x_inf, x_sup=x_sup)
+            delta_t, args.np_bcs, x_inf=x_inf, x_sup=x_sup, side=args.side)
         if args.np_bcs:
             M_mats, G_mats, H_mats = scheme_output
         else:
@@ -182,7 +185,8 @@ def main():
         u_vecs = [np.ones(m * (n - 1))]
         print(f'Series {s} / {len(prec_series_list)}: solving linear systems:')
         if not args.read_folder and args.np_bcs:
-            u_array = np.zeros((z + 1, args.year_cycles * m, n - 1))
+            u_array = np.zeros((z + 1, args.year_cycles * m, n)) if args.side \
+                else np.zeros((z + 1, args.year_cycles * m, n - 1))
             u_array[0, :, :] = 1
             u_array[:, 0, :] = 1
             # Solve iteratively for each s and t
@@ -199,6 +203,7 @@ def main():
                         except IndexError:
                             t_index -= m
         elif not args.read_folder:
+            # TODO: handle one-sided
             for i in range(z):
                 if i % 10 == 0:
                     print(i, '/', z)
@@ -255,7 +260,7 @@ def main():
         if args.plot:
             plot_results(u_array, x_data, t_mesh, n, m, z, args.delta_s, delta_t,
                 param_func, start_date=model_df['t'].iloc[0] if args.np_bcs else None,
-                non_periodic=False, x_inf=x_inf, x_sup=x_sup,
+                non_periodic=False, x_inf=x_inf, x_sup=x_sup, side=args.side,
                 title=f'{PLOT_LOCATIONS[loc]} {str(loc)}' if PLOT_LOCATIONS else str(loc))
         if args.read_folder is None:
             np.save(f'unami_results/u_array_{str(loc)}.npy', u_array)

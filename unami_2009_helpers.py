@@ -365,67 +365,6 @@ def build_scheme(param_func, t_mesh, n, m, delta_s, delta_t, non_periodic=False,
         A_mat[0 : n - 1, (m - 1)*(n - 1) : m*(n - 1)] = 0.5 * H_mats[m - 1]
         A_mat[(m - 1)*(n - 1) : m*(n - 1), 0 : n - 1] = -0.5 * H_mats[0]
     return A_mat, G_mats
-
-
-def build_scheme_time_indep(param_func, x_data, n, delta_s, _time):
-    x_inf = x_data.min()
-    x_sup = x_data.max()
-    delta_x = (x_sup - x_inf) / n
-    x_mesh = np.linspace(x_inf, x_sup, n + 1)
-
-    def _beta(t):
-        return param_func('beta', t)
-    def _v(t, x):
-        return np.exp(param_func('psi', t, x))
-    def _K(t):
-        return np.exp(param_func('kappa', t))
-    def peclet_num(x, t):
-        return _K(t) * (_beta(t) - x) * delta_x / _v(t, x)
-    
-    M_mat = np.zeros((n - 1, n - 1, 4))
-    G_mat = np.zeros((n - 1, n - 1))
-    for k in range(n - 1):
-        x_k = x_mesh[k]
-        x_km1 = x_mesh[k - 1] if k > 0 else x_inf
-        x_km0p5 = (x_km1 + x_k) / 2
-        x_kp1 = x_mesh[k + 1] if k < n - 2 else x_sup
-        x_kp0p5 = (x_k + x_kp1) / 2
-        
-        pe_l = peclet_num(x_km0p5, _time)
-        p_l = np.exp(pe_l)
-        pe_r = peclet_num(x_kp0p5, _time)
-        p_r = np.exp(-pe_r)
-
-        # Contributions from phi du/ds term
-        f = lambda _x, _t: 1 / _v(_t, _x)
-        if k > 0:
-            G_mat[k, k - 1] = -delta_x**2 / delta_s * f(x_km1, _time) \
-                / (p_l + 1) / (p_l + 2)
-            M_mat[k, k - 1, 0] = G_mat[k, k - 1]
-        G_mat[k, k] = -delta_x**2 / delta_s * f(x_k, _time) \
-            * (1 / (p_l + 2) + 1 / (p_r + 2))
-        M_mat[k, k, 0] = G_mat[k, k]
-        if k < n - 2:
-            G_mat[k, k + 1] = -delta_x**2 / delta_s * f(x_kp1, _time) \
-                / (p_r + 1) / (p_r + 2)
-            M_mat[k, k + 1, 0] = G_mat[k, k + 1]
-
-        # Contributions from phi du/dx term
-        if k > 0:
-            M_mat[k, k - 1, 2] = -pe_l / (p_l + 1)
-        M_mat[k, k, 2] = pe_l / (p_l + 1) - pe_r / (p_r + 1)
-        if k < n - 2:
-            M_mat[k, k + 1, 2] = pe_r / (p_r + 1)
-
-        # Contributions from dphi/dx du/dx term
-        if k > 0:
-            M_mat[k, k - 1, 3] = 1/2
-        M_mat[k, k, 3] = -1
-        if k < n - 2:
-            M_mat[k, k + 1, 3] = 1/2
-
-    M_mat = M_mat.sum(axis=2)
-    return M_mat, G_mat
     
 
 def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
@@ -487,7 +426,7 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
         for x_i, k in enumerate(x_plot_indices):
             colour = colours[x_i]
             cdfs[k] = 1 - u_last_cycle[:, j, k]
-            axis.plot(s_mesh, cdfs[k], colour, label=f'x = {x_inf + k * delta_x}')
+            axis.plot(s_mesh, cdfs[k], colour, label=f'x = {round(x_inf + k * delta_x, 3)}')
             max_prob[t_i, x_i] = cdfs[k][-1]
             median[t_i, x_i] = None if cdfs[k][-1] < 0.5 else \
                 np.argwhere(cdfs[k] >= 0.5)[0, 0] * delta_s
@@ -498,7 +437,7 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
         for x_i, k in enumerate(x_plot_indices):
             colour = colours[x_i]
             pdf = [(cdfs[k][i + 1] - cdfs[k][i]) / delta_s for i in range(len(cdfs[k]) - 1)]
-            axis.plot(s_mesh[:-1], pdf, colour, label=f'x = {x_inf + k * delta_x}')
+            axis.plot(s_mesh[:-1], pdf, colour, label=f'x = {round(x_inf + k * delta_x, 3)}')
             mode[t_i, x_i] = np.argmax(pdf) * delta_s
             mean[t_i, x_i] = None if cdfs[k][-1] == 0 else \
                 np.sum([s_mesh[i] * p * delta_s / cdfs[k][-1] for i, p in enumerate(pdf)])
@@ -506,6 +445,11 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
         axis.set_title(f'pdf: t = {date_title}')
         axis.legend()
     plt.show()
+
+    print(max_prob)
+    print(mean)
+    print(median)
+    print(mode)
 
     figure, axes = plt.subplots(3, 4)
     axes = iter(axes.flatten())
@@ -560,71 +504,7 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
     axis.set_xlabel('beta')
     axis.set_ylabel('j_2')
     plt.show()
-    
 
-def plot_results_time_indep(u_arrays, x_data, n, z, delta_s, param_func, title=None):
-    x_inf = x_data.min()
-    x_sup = x_data.max()
-    x_mesh = np.linspace(x_inf, x_sup, n + 1)
-    s_mesh = np.linspace(0, z * delta_s, z + 1)
-    print('x_inf, x_sup, delta_x:', x_inf, x_sup, (x_sup - x_inf) / n)
-
-    def _beta(t):
-        return param_func('beta', t)
-    def _v(t, x):
-        return np.exp(param_func('psi', t, x))
-    def _K(t):
-        return np.exp(param_func('kappa', t))
-    def build_title(t):
-        date_part = (datetime(2000, 1, 1) + timedelta(days=int(t))).strftime('%b %d')
-        if title:
-            return f'{title}: {date_part}'
-        return date_part
-
-    figure, axes = plt.subplots(3, 4)
-    axes = iter(axes.flatten())
-    u_min = np.Inf
-    u_max = -np.Inf
-    t_indices = np.arange(0, 360, 30)
-    for i, t in enumerate(t_indices):
-        u_slice = u_arrays[i]
-        u_min = np.min([u_min, u_slice.min(axis=(0, 1))])
-        u_max = np.max([u_max, u_slice.max(axis=(0, 1))])
-    for i, t in enumerate(t_indices):
-        axis = next(axes)
-        X, S = np.meshgrid(x_mesh[1 : -1], s_mesh)
-        cmap = axis.pcolormesh(S, X, u_arrays[i], cmap='viridis',
-            vmin=u_min, vmax=u_max)
-        plt.colorbar(cmap)
-        axis.set_xlabel('s')
-        axis.set_ylabel('x')
-        axis.set_title(build_title(t))
-        _time = t * 24
-        beta = _beta(_time)
-        print(f't = {t} days: beta = {beta}, K = {_K(_time)}, v at x_inf = { _v(_time, x_inf)},'
-            f' v at x_sup = { _v(_time, x_sup)}')
-        axis.plot(s_mesh, [beta for _ in s_mesh], 'r-')
-    plt.show()
-
-    figure, axes = plt.subplots(3, 4)
-    axes = iter(axes.flatten())
-    u_min = np.Inf
-    u_max = -np.Inf
-    t_indices = np.arange(0, 360, 30)
-    for i, t in enumerate(t_indices):
-        axis = next(axes)
-        j_inf = u_arrays[0].max(axis=1)
-        j_2 = np.zeros(z + 1)
-        for j in range(z + 1):
-            j_2[j] = (u_arrays[i][j, :] ** 2).sum()
-        j_2 /= (n - 1)
-        axis.plot(s_mesh, j_inf, 'r', label='j_inf')
-        axis.plot(s_mesh, j_2, 'b', label='j_2')
-        axis.set_xlabel('s')
-        axis.set_ylabel('u')
-        axis.set_title(build_title(t))
-        axis.legend()
-    plt.show()
 
 EXTREME_LOWER_QUANTILES = pd.read_csv('x_lower_quantiles.csv', index_col=0)
 EXTREME_UPPER_QUANTILES = pd.read_csv('x_upper_quantiles.csv', index_col=0)
