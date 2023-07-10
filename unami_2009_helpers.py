@@ -271,39 +271,37 @@ def build_scheme(param_func, t_mesh, n, m, delta_s, delta_t, non_periodic=False,
             # Contributions from phi du/ds term
             f = lambda _x, _t: 1 / _v(_t, _x)
             if k == 0:
-                M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_k, t) \
+                M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_kp0p5, t) \
                     / (p_r + 2)
             elif k == n:
-                M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_k, t) \
+                M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_km0p5, t) \
                     / (p_l + 2)
             else:
-                M_mats[j][k, k, 0] = -delta_x**2 / delta_s * f(x_k, t) \
-                    * (1 / (p_l + 2) + 1 / (p_r + 2))
+                M_mats[j][k, k, 0] = -delta_x**2 / delta_s \
+                    * (f(x_km0p5, t) / (p_l + 2) + f(x_kp0p5, t) / (p_r + 2))
             if k > 0:
-                M_mats[j][k, k - 1, 0] = -delta_x**2 / delta_s * f(x_km1, t) \
+                M_mats[j][k, k - 1, 0] = -delta_x**2 / delta_s * f(x_km0p5, t) \
                     / (p_l + 1) / (p_l + 2)
             if k < n:
-                M_mats[j][k, k + 1, 0] = -delta_x**2 / delta_s * f(x_kp1, t) \
+                M_mats[j][k, k + 1, 0] = -delta_x**2 / delta_s * f(x_kp0p5, t) \
                     / (p_r + 1) / (p_r + 2)
 
             # Contributions from phi du/dt term
             f = lambda _x, _t: np.exp(-_x) / _v(_t, _x)
-            # TODO: why does this work??? should be +1 if non-periodic
-            sign = -1 if non_periodic else -1
             if k == 0:
-                M_mats[j][k, k, 1] = sign * delta_x**2 / delta_t * f(x_k, t) \
+                M_mats[j][k, k, 1] = -delta_x**2 / delta_t * f(x_kp0p5, t) \
                     / (p_r + 2)
             elif k == n:
-                M_mats[j][k, k, 1] = sign * delta_x**2 / delta_t * f(x_k, t) \
+                M_mats[j][k, k, 1] = -delta_x**2 / delta_t * f(x_km0p5, t) \
                     / (p_l + 2)
             else:
-                M_mats[j][k, k, 1] = sign * delta_x**2 / delta_t * f(x_k, t) \
-                    * (1 / (p_l + 2) + 1 / (p_r + 2))
+                M_mats[j][k, k, 1] = -delta_x**2 / delta_t \
+                    * (f(x_km0p5, t) / (p_l + 2) + f(x_kp0p5, t) / (p_r + 2))
             if k > 0:
-                M_mats[j][k, k - 1, 1] = sign * delta_x**2 / delta_t * f(x_km1, t) \
+                M_mats[j][k, k - 1, 1] = -delta_x**2 / delta_t * f(x_km0p5, t) \
                     / (p_l + 1) / (p_l + 2)
             if k < n:
-                M_mats[j][k, k + 1, 1] = sign * delta_x**2 / delta_t * f(x_kp1, t) \
+                M_mats[j][k, k + 1, 1] = -delta_x**2 / delta_t * f(x_kp0p5, t) \
                     / (p_r + 1) / (p_r + 2)
 
             # Contributions from phi du/dx term
