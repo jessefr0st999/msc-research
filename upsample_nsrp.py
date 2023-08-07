@@ -15,6 +15,7 @@ NSRP_PARAMS = (
     1, # average cell duration in days
     1, # average cell displacement from storm front in days
 )
+ATTEMPTS_LIMIT = 10
 
 def nsrp_simulation(month_prec, inv_cdf, start_date, previous_cells,
         num_storms_rule, av_num_cells, av_cell_time, av_cell_disp):
@@ -130,7 +131,16 @@ def main():
 
     def calculate_and_save(loc, plot=False):
         prec_series = prec_df[loc]
-        upsampled_series = simulate_nsrp(prec_series, *NSRP_PARAMS)
+        # Can occasionally fail; try several times before exiting
+        upsampled_series = None
+        attempts = 0
+        while upsampled_series is None:
+            if attempts == ATTEMPTS_LIMIT:
+                print(f'No feasible series generated for {str(loc)} after '
+                    f'{ATTEMPTS_LIMIT} attempts; exiting.')
+                exit()
+            upsampled_series = simulate_nsrp(prec_series, *NSRP_PARAMS)
+            attempts += 1
         upsampled_series.name = str(loc)
         upsampled_series.to_csv(f'data/fused_upsampled/fused_daily_nsrp_{loc[0]}_{loc[1]}.csv')
         if plot:
@@ -148,16 +158,22 @@ def main():
             axis.set_ylabel('prec')
             axis.set_title('daily upsampled')
             plt.show()
+        return attempts
 
-    # for i, loc in enumerate(prec_df.columns):
-    #     print(f'{i} / {len(prec_df.columns)}: {loc}')
-    #     calculate_and_save(loc)
+    for i, loc in enumerate(prec_df.columns):
+        if i < 281:
+            continue
+        attempts = calculate_and_save(loc)
+        if attempts > 1:
+            print(f'{i} / {len(prec_df.columns)}: {loc} ({attempts} attempts)')
+        else:
+            print(f'{i} / {len(prec_df.columns)}: {loc}')
 
     # FUSED_SERIES_KEY = (-12.75, 131.5) # Darwin
     # FUSED_SERIES_KEY = (-37.75, 145.5) # Melbourne
     # FUSED_SERIES_KEY = (-28.75, 153.5) # Lismore
-    FUSED_SERIES_KEY = (-25.75, 133.5) # Central Australia
-    calculate_and_save(FUSED_SERIES_KEY, True)
+    # FUSED_SERIES_KEY = (-25.75, 133.5) # Central Australia
+    # calculate_and_save(FUSED_SERIES_KEY, True)
 
 if __name__ == '__main__':
     main()
