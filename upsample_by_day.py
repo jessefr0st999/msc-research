@@ -125,9 +125,11 @@ ITERATIONS = 3000
 
 def main():
     np.random.seed(0)
+    prec_df, _, _ = prepare_df('data/precipitation', 'FusedData.csv', 'prec')
+    prec_df.index = pd.DatetimeIndex(prec_df.index)
+    
     def calculate_and_save(loc, plot=False):
         prec_series = prec_df[loc]
-        # prec_series = prec_df[loc][-48:]
         upsampled_series_list = []
         for i in range(len(prec_series)):
             upsampled_series_list.append(upsample_by_day(prec_series, prec_series.index[i]))
@@ -135,7 +137,7 @@ def main():
             exit()
         upsampled_series = pd.concat(upsampled_series_list)
         upsampled_series.name = str(loc)
-        # upsampled_series.to_csv(f'data/fused_upsampled/fused_daily_{loc[0]}_{loc[1]}_it_{ITERATIONS}.csv')
+        upsampled_series.to_csv(f'data/fused_upsampled/fused_daily_{loc[0]}_{loc[1]}_it_{ITERATIONS}.csv')
         if plot:
             figure, axes = plt.subplots(2, 1)
             axes = iter(axes.flatten())
@@ -143,15 +145,14 @@ def main():
             axis.plot(prec_series, 'mo-')
             axis.set_xlabel('t')
             axis.set_ylabel('prec')
+            axis.set_title('monthly')
 
             axis = next(axes)
             axis.plot(upsampled_series, 'go-')
             axis.set_xlabel('t')
             axis.set_ylabel('prec')
+            axis.set_title('daily upsampled')
             plt.show()
-
-    prec_df, _, _ = prepare_df('data/precipitation', 'FusedData.csv', 'prec')
-    prec_df.index = pd.DatetimeIndex(prec_df.index)
 
     # for i, loc in enumerate(prec_df.columns):
     #     print(f'{i} / {len(prec_df.columns)}: {loc}')
