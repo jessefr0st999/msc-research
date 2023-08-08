@@ -1,6 +1,7 @@
 import argparse
 from datetime import datetime
 from math import floor
+import ast
 
 import pandas as pd
 import numpy as np
@@ -9,8 +10,8 @@ import matplotlib.pyplot as plt
 from scipy.sparse.linalg import spsolve
 
 from helpers import prepare_df
-from unami_2009_helpers import prepare_model_df, estimate_params, \
-    build_scheme, plot_results, get_x_domain
+from unami_2009_helpers import prepare_model_df, calculate_param_coeffs, \
+    calculate_param_func, build_scheme, plot_results, get_x_domain
 
 np.random.seed(0)
 np.set_printoptions(suppress=True)
@@ -77,6 +78,7 @@ def main():
     parser.add_argument('--shrink_x_quantile', type=float, default=None)
     parser.add_argument('--shrink_x_mixed', action='store_true', default=False)
     parser.add_argument('--year_cycles', type=int, default=1)
+    parser.add_argument('--sar_corrected', action='store_true', default=False)
     args = parser.parse_args()
 
     if args.dataset == 'fused':
@@ -86,6 +88,10 @@ def main():
         prec_df = pd.read_csv(f'data/fused_upsampled/fused_daily_'
             f'{FUSED_SERIES_KEY[0]}_{FUSED_SERIES_KEY[1]}_it_3000.csv', index_col=0)
         prec_series_full = pd.Series(prec_df.values[:, 0], index=pd.DatetimeIndex(prec_df.index))
+    elif args.dataset == 'fused_daily_nsrp':
+        prec_df = pd.read_csv(f'data/fused_upsampled/fused_daily_nsrp_'
+            f'{FUSED_SERIES_KEY[0]}_{FUSED_SERIES_KEY[1]}.csv', index_col=0)
+        prec_series_full = pd.Series(prec_df.values[:, 0], index=pd.DatetimeIndex(prec_df.index))
     elif args.dataset == 'test':
         prec_df = pd.read_csv(f'data_unfused/test_data.csv', index_col=0, header=None)
         prec_series_full = pd.Series(prec_df.values[:, 0], index=pd.DatetimeIndex(prec_df.index))
@@ -94,7 +100,24 @@ def main():
         for b in TIME_BLOCKS]
     x_max_all = np.max([df['x'].max() for df in model_dfs])
     x_min_all = np.min([df['x'].min() for df in model_dfs])
-    param_funcs = [estimate_params(df, PERIOD, shift_zero=True) for df in model_dfs]
+    param_funcs = []
+    for df in model_dfs:
+        if args.sar_corrected:
+            df_suffix = 'nsrp' if args.dataset == 'fused_daily_nsrp' else 'orig'
+            beta_coeffs_df = pd.read_csv(f'beta_coeffs_fused_daily_{df_suffix}.csv',
+                index_col=0, converters={0: ast.literal_eval})
+            loc_index = list(beta_coeffs_df.index.values).index(FUSED_SERIES_KEY)
+            beta_hats = {
+                'beta': pd.read_csv(f'corrected_beta_coeffs_{df_suffix}.csv')\
+                    .iloc[loc_index, :].values,
+                'kappa': pd.read_csv(f'corrected_kappa_coeffs_{df_suffix}.csv')\
+                    .iloc[loc_index, :].values,
+                'psi': pd.read_csv(f'corrected_psi_coeffs_{df_suffix}.csv')\
+                    .iloc[loc_index, :].values,
+            }
+        else:
+            beta_hats = calculate_param_coeffs(df, PERIOD, shift_zero=True)
+        param_funcs.append(calculate_param_func(df, PERIOD, beta_hats))
     x_medians = [df['x'].median() for df in model_dfs]
 
     year_t_vec = np.arange('2000', '2001', dtype='datetime64[D]')

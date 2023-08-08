@@ -8,6 +8,13 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+DEFAULT_PARAM_INFO = {
+    'beta': (0, 3),
+    'psi': (2, 2),
+    # 'psi': (0, 2),
+    'kappa': (0, 2),
+}
+
 def prepare_model_df(prec_series, prec_inc, ds_period=None):
     cum_sums = prec_series.cumsum()
     times = prec_series.index
@@ -64,11 +71,10 @@ def detrend_x(x_series, rolling=None, polynomial=1):
     return pd.Series(detrend(x_series, order=polynomial), index=x_series.index)
 
 
-# Estimate parameter functions by estimating least squares coefficients for fitti ng the
+# Estimate parameter functions by estimating least squares coefficients for fitting the
 # functions as polynomials in x multiplied by sin/cos in t
 # Number of least squares coefficients estimated for each parameter is (n_X + 1) * (1 + 2*n_t)
-def estimate_params(model_df, period, shift_zero=False, param_info=None,
-        trend_polynomial=None):
+def calculate_param_coeffs(model_df, period, shift_zero=False, param_info=None):
     n = model_df.shape[0] - 1
     x_data = np.array(model_df['x'])
     s_data = np.array(model_df['s'])
@@ -93,11 +99,7 @@ def estimate_params(model_df, period, shift_zero=False, param_info=None,
         'kappa': kappa_f_hat,
     }
     if param_info is None:
-        param_info = {
-            'beta': (0, 3),
-            'psi': (2, 2),
-            'kappa': (0, 2),
-        }
+        param_info = dict(DEFAULT_PARAM_INFO)
     for param, (n_X, n_t) in param_info.items():
         X_mat = np.zeros((n, (n_X + 1) * (1 + 2*n_t)))
         y_vec = np.zeros(n)
@@ -117,7 +119,11 @@ def estimate_params(model_df, period, shift_zero=False, param_info=None,
                     X_mat[j, (1 + 2*n_t) * i + 2*k + 2] = x_pow * np.cos(theta)
         X_mats[param] = X_mat
         beta_hats[param] = np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T @ y_vec
+    return beta_hats
 
+def calculate_param_func(model_df, period, beta_hats, param_info=None, trend_polynomial=None):
+    if param_info is None:
+        param_info = dict(DEFAULT_PARAM_INFO)
     def _param_func(param, t, x=None):
         # Input t should be in units of hours
         n_X, n_t = param_info[param]
@@ -131,7 +137,6 @@ def estimate_params(model_df, period, shift_zero=False, param_info=None,
                 X_vec[(1 + 2*n_t) * i + 2*k + 1] = x_pow * np.sin(theta)
                 X_vec[(1 + 2*n_t) * i + 2*k + 2] = x_pow * np.cos(theta)
         return X_vec @ beta_hats[param]
-
     if trend_polynomial:
         # TODO: Handle this for quadratic and moving average trends
         x_deseasonalised = deseasonalise_x(model_df, _param_func)
@@ -144,7 +149,6 @@ def estimate_params(model_df, period, shift_zero=False, param_info=None,
                 return _param_func(param, t, x) - trend_slope * t
             return _param_func(param, t, x)
         return _trend_param_func
-
     return _param_func
 
 

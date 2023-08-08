@@ -12,8 +12,9 @@ from scipy.sparse.linalg import spsolve
 np.random.seed(0)
 
 from helpers import get_map, scatter_map, prepare_df, configure_plots
-from unami_2009_helpers import prepare_model_df, estimate_params, \
-    build_scheme, plot_results, get_x_domain, deseasonalise_x, detrend_x
+from unami_2009_helpers import prepare_model_df, calculate_param_coeffs, \
+    calculate_param_func, build_scheme, plot_results, get_x_domain, \
+    deseasonalise_x, detrend_x
 
 PERIOD = 24 * 365
 BOM_DAILY_PATH = 'data_unfused/bom_daily'
@@ -49,19 +50,18 @@ def main():
     parser.add_argument('--num_samples', type=int, default=None)
     parser.add_argument('--delta_s', type=float, default=10)
     parser.add_argument('--plot', action='store_true', default=False)
-    parser.add_argument('--np_params', action='store_true', default=False) # TODO: implement
     parser.add_argument('--np_bcs', action='store_true', default=False)
     parser.add_argument('--shrink_x_proportion', type=float, default=None)
     parser.add_argument('--shrink_x_quantile', type=float, default=None)
     parser.add_argument('--shrink_x_mixed', action='store_true', default=False)
     parser.add_argument('--year_cycles', type=int, default=1)
     parser.add_argument('--side', default=None)
+    parser.add_argument('--sar_corrected', action='store_true', default=False)
     args = parser.parse_args()
     
     full_loc_list = []
     prec_series_list = []
     # prec_series_list receives data sequentially by location
-    # For decadal, each location is added as a pair with decade 1 (2) data at even (odd) entries
     if args.dataset == 'fused':
         # Select random locations from the fused dataset
         prec_df, _, _ = prepare_df('data/precipitation', 'FusedData.csv', 'prec')
@@ -70,9 +70,15 @@ def main():
         for loc, row in _prec_df.iterrows():
             full_loc_list.append(loc)
             prec_series_list.append(row)
-    elif args.dataset == 'fused_daily':
+    elif args.dataset in ['fused_daily', 'fused_daily_nsrp']:
         num_samples = args.num_samples if args.num_samples else 1391
-        pathnames = [path.name for path in os.scandir(FUSED_DAILY_PATH)]
+        pathnames = []
+        for path in os.scandir(FUSED_DAILY_PATH):
+            if args.dataset == 'fused_daily_nsrp' and not path.name.startswith('fused_daily_nsrp'):
+                continue
+            if args.dataset == 'fused_daily' and not path.name.endswith('it_3000.csv'):
+                continue
+            pathnames.append(path.name)
         pathnames = np.random.choice(pathnames, num_samples, replace=False)
         for pathname in pathnames:
             prec_df = pd.read_csv(f'{FUSED_DAILY_PATH}/{pathname}', index_col=0)
@@ -85,17 +91,16 @@ def main():
         info_df = pd.read_csv('bom_info.csv', index_col=0, converters={0: ast.literal_eval})
         filenames = set(info_df.sample(args.num_samples)['filename']) if args.num_samples else None
         for i, path in enumerate(os.scandir(BOM_DAILY_PATH)):
-            if path.is_file():
-                if args.num_samples and path.name not in filenames:
-                    continue
-                prec_df = pd.read_csv(f'{BOM_DAILY_PATH}/{path.name}')
-                prec_df = prec_df.dropna(subset=['Rain'])
-                prec_df.index = pd.DatetimeIndex(prec_df['Date'])
-                loc = (-prec_df.iloc[0]['Lat'], prec_df.iloc[0]['Lon'])
-                prec_series = pd.Series(prec_df['Rain']).dropna().loc['2000-01-01':]
-                prec_series.name = loc
-                full_loc_list.append(loc)
-                prec_series_list.append(prec_series)
+            if not path.is_file() or (args.num_samples and path.name not in filenames):
+                continue
+            prec_df = pd.read_csv(f'{BOM_DAILY_PATH}/{path.name}')
+            prec_df = prec_df.dropna(subset=['Rain'])
+            prec_df.index = pd.DatetimeIndex(prec_df['Date'])
+            loc = (-prec_df.iloc[0]['Lat'], prec_df.iloc[0]['Lon'])
+            prec_series = pd.Series(prec_df['Rain']).dropna().loc['2000-01-01':]
+            prec_series.name = loc
+            full_loc_list.append(loc)
+            prec_series_list.append(prec_series)
             
     n = args.x_steps
     m = args.t_steps
@@ -118,10 +123,12 @@ def main():
     x_inf_list = []
     x_sup_list = []
     trend_list = []
+    beta_coeffs_list = []
+    kappa_coeffs_list = []
+    psi_coeffs_list = []
     # Fit the parameters then solve the DE for each prec series
     # Extract parameter values and useful statistics from the DE solution
     s_mesh = np.linspace(0, z * args.delta_s, z + 1)
-    loc_list = []
     # Slice the DE solution at evenly-spaced times throughout the year
     t_indices = [floor(i * m / 12) for i in range(12)]
     # Sample with various values of x
@@ -139,6 +146,7 @@ def main():
         for path in os.scandir(f'unami_results/{args.read_folder}'):
             if path.is_file():
                 calculated_locations.append(path.name.split('_')[2].split('.npy')[0])
+    loc_list = []
     for s, prec_series in enumerate(prec_series_list):
         loc = full_loc_list[s]
         if PLOT_LOCATIONS and loc not in PLOT_LOCATIONS:
@@ -152,7 +160,25 @@ def main():
                 continue
         loc_list.append(loc)
         model_df = prepare_model_df(prec_series, args.prec_inc)
-        param_func = estimate_params(model_df, PERIOD, shift_zero=True)
+        if args.sar_corrected:
+            df_suffix = 'nsrp' if args.dataset == 'fused_daily_nsrp' else 'orig'
+            beta_coeffs_df = pd.read_csv(f'beta_coeffs_fused_daily_{df_suffix}.csv',
+                index_col=0, converters={0: ast.literal_eval})
+            loc_index = list(beta_coeffs_df.index.values).index(loc)
+            beta_hats = {
+                'beta': pd.read_csv(f'corrected_beta_coeffs_{df_suffix}.csv')\
+                    .iloc[loc_index, :].values,
+                'kappa': pd.read_csv(f'corrected_kappa_coeffs_{df_suffix}.csv')\
+                    .iloc[loc_index, :].values,
+                'psi': pd.read_csv(f'corrected_psi_coeffs_{df_suffix}.csv')\
+                    .iloc[loc_index, :].values,
+            }
+        else:
+            beta_hats = calculate_param_coeffs(model_df, PERIOD, shift_zero=True)
+        param_func = calculate_param_func(model_df, PERIOD, beta_hats)
+        beta_coeffs_list.append(beta_hats['beta'])
+        kappa_coeffs_list.append(beta_hats['kappa'])
+        psi_coeffs_list.append(beta_hats['psi'])
         x_deseasonalised = deseasonalise_x(model_df, param_func)
         x_detrended = detrend_x(x_deseasonalised, polynomial=1)
         trend = x_deseasonalised - x_detrended
@@ -282,12 +308,19 @@ def main():
     x_inf_df = pd.DataFrame(x_inf_list, index=loc_list)
     x_sup_df = pd.DataFrame(x_sup_list, index=loc_list)
     trend_df = pd.DataFrame(trend_list, index=loc_list)
+    beta_coeffs_df = pd.DataFrame(beta_coeffs_list, index=loc_list)
+    kappa_coeffs_df = pd.DataFrame(kappa_coeffs_list, index=loc_list)
+    psi_coeffs_df = pd.DataFrame(psi_coeffs_list, index=loc_list)
+    beta_coeffs_df.to_csv(f'beta_coeffs_{args.dataset}.csv')
+    kappa_coeffs_df.to_csv(f'kappa_coeffs_{args.dataset}.csv')
+    psi_coeffs_df.to_csv(f'psi_coeffs_{args.dataset}.csv')
+    
     lats, lons = list(zip(*loc_list))
-
     def df_min(df):
         return df.min().min()
     def df_max(df):
         return df.max().max()
+
     for df, label, _min, _max in [
         (x_inf_df, 'x_inf', df_min(x_inf_df), df_max(x_inf_df)),
         (x_sup_df, 'x_sup', df_min(x_sup_df), df_max(x_sup_df)),
@@ -300,8 +333,9 @@ def main():
         mx, my = _map(lons, lats)
         axis.set_title(label)
         scatter_map(axis, mx, my, df[0], cb_min=_min,
-            cb_max=_max, size_func=lambda series: 15, cmap='RdYlBu_r')
+            cb_max=_max, size_func=lambda x: 15, cmap='RdYlBu_r')
         plt.show()
+
     for df, label, _min, _max in [
         (last_s_median_df, 'median probability at final s', 0, 1),
         (last_s_std_df, 'std probability at final s', 0, df_max(last_s_std_df)),
@@ -317,11 +351,12 @@ def main():
             _map = get_map(axis)
             mx, my = _map(lons, lats)
             scatter_map(axis, mx, my, df[j], cb_min=_min,
-                cb_max=_max, size_func=lambda series: 15, cmap='inferno_r')
+                cb_max=_max, size_func=lambda x: 15, cmap='inferno_r')
             days = int(j) * delta_t / 24
             date_part = (datetime(2000, 1, 1) + timedelta(days=days)).strftime('%b %d')
             axis.set_title(f'{label} at t = {date_part}')
         plt.show()
+        
     for df, label, _min, _max in [
         (last_cdf_df, 'final value of cdf', 0, 1),
         (last_pdf_df, 'final value of pdf', 0, df_max(last_pdf_df)),
@@ -343,7 +378,7 @@ def main():
                 _map = get_map(axis)
                 mx, my = _map(lons, lats)
                 scatter_map(axis, mx, my, df[(j, k)], cb_min=_min,
-                    cb_max=_max, size_func=lambda series: 15, cmap='inferno_r')
+                    cb_max=_max, size_func=lambda x: 15, cmap='inferno_r')
                 days = int(j) * delta_t / 24
                 date_part = (datetime(2000, 1, 1) + timedelta(days=days)).strftime('%b %d')
                 axis.set_title(f'{label} at t = {date_part}, x = x_inf + {k} * delta_x')

@@ -1,26 +1,28 @@
 import argparse
 from datetime import datetime
+import ast
 
 import pandas as pd
 import numpy as np
 from scipy.sparse.linalg import spsolve
 
 from helpers import prepare_df
-from unami_2009_helpers import prepare_model_df, estimate_params, plot_data, \
+from unami_2009_helpers import prepare_model_df, calculate_param_coeffs, \
+    calculate_param_func, plot_data, \
     plot_params, build_scheme, plot_results, get_x_domain
 
 np.random.seed(0)
 np.set_printoptions(suppress=True)
 YEARS = range(2000, 2022)
 # FUSED_SERIES_KEY = (-28.75, 153.5) # Lismore
-# FUSED_SERIES_KEY = (-17.75, 140.5) # Mid-NT
+# FUSED_SERIES_KEY = (-17.75, 140.5) # NW Qld
 # FUSED_SERIES_KEY = (-25.75, 133.5) # Central Australia
-FUSED_SERIES_KEY = (-37.75, 145.5) # Melbourne
+# FUSED_SERIES_KEY = (-37.75, 145.5) # Melbourne
 # FUSED_SERIES_KEY = (-12.75, 131.5) # Darwin
 # FUSED_SERIES_KEY = (-33.25, 151.5) # Central Coast
 # FUSED_SERIES_KEY = (-17.75, 122.5) # Broome
 # FUSED_SERIES_KEY = (-42.75, 147.5) # Hobart
-# FUSED_SERIES_KEY = (-16.75, 145.5) # Cairns
+FUSED_SERIES_KEY = (-16.75, 145.5) # Cairns
 # FUSED_SERIES_KEY = (-35.25, 138.5) # Adelaide
 # FUSED_SERIES_KEY = (-27.75, 152.5) # Brisbane
 # FUSED_SERIES_KEY = (-31.75, 116.5) # Perth
@@ -50,7 +52,6 @@ def main():
     parser.add_argument('--plot', action='store_true', default=False)
     parser.add_argument('--fd', action='store_true', default=False)
     parser.add_argument('--deseasonalise', action='store_true', default=False)
-    parser.add_argument('--np_params', action='store_true', default=False)
     parser.add_argument('--np_bcs', action='store_true', default=False)
     parser.add_argument('--shrink_x_proportion', type=float, default=None)
     parser.add_argument('--shrink_x_quantile', type=float, default=None)
@@ -59,6 +60,7 @@ def main():
     parser.add_argument('--year_cycles', type=int, default=1)
     parser.add_argument('--side', default=None)
     parser.add_argument('--trend_polynomial', type=int, default=None)
+    parser.add_argument('--sar_corrected', action='store_true', default=False)
     args = parser.parse_args()
 
     if args.dataset == 'fused':
@@ -67,6 +69,10 @@ def main():
     elif args.dataset == 'fused_daily':
         prec_series = pd.read_csv(f'data/fused_upsampled/fused_daily_'
             f'{FUSED_SERIES_KEY[0]}_{FUSED_SERIES_KEY[1]}_it_3000.csv', index_col=0)
+        prec_series = pd.Series(prec_series.values[:, 0], index=pd.DatetimeIndex(prec_series.index))
+    elif args.dataset == 'fused_daily_nsrp':
+        prec_series = pd.read_csv(f'data/fused_upsampled/fused_daily_nsrp_'
+            f'{FUSED_SERIES_KEY[0]}_{FUSED_SERIES_KEY[1]}.csv', index_col=0)
         prec_series = pd.Series(prec_series.values[:, 0], index=pd.DatetimeIndex(prec_series.index))
     elif args.dataset == 'bom_daily':
         prec_df = pd.read_csv(f'data_unfused/{BOM_DAILY_FILE}.csv')
@@ -89,31 +95,32 @@ def main():
     m = args.t_steps
     z = args.s_steps
     x_data = np.array(model_df['x'])
-    if args.np_params:
-        param_info = {
-            'beta': (0, 15),
-            'psi': (2, 10),
-            'kappa': (0, 10),
+    if args.sar_corrected:
+        df_suffix = 'nsrp' if args.dataset == 'fused_daily_nsrp' else 'orig'
+        beta_coeffs_df = pd.read_csv(f'beta_coeffs_fused_daily_{df_suffix}.csv',
+            index_col=0, converters={0: ast.literal_eval})
+        loc_index = list(beta_coeffs_df.index.values).index(FUSED_SERIES_KEY)
+        beta_hats = {
+            'beta': pd.read_csv(f'corrected_beta_coeffs_{df_suffix}.csv')\
+                .iloc[loc_index, :].values,
+            'kappa': pd.read_csv(f'corrected_kappa_coeffs_{df_suffix}.csv')\
+                .iloc[loc_index, :].values,
+            'psi': pd.read_csv(f'corrected_psi_coeffs_{df_suffix}.csv')\
+                .iloc[loc_index, :].values,
         }
-        param_func = estimate_params(model_df,
-            24 * (model_df['t'].iloc[-1] - model_df['t'].iloc[0]).days, param_info)
     else:
-        param_func = estimate_params(model_df, PERIOD, shift_zero=True,
-            trend_polynomial=args.trend_polynomial)
+        beta_hats = calculate_param_coeffs(model_df, PERIOD, shift_zero=True)
+    param_func = calculate_param_func(model_df, PERIOD, beta_hats,
+        trend_polynomial=args.trend_polynomial)
     x_inf, x_sup = get_x_domain(model_df['x'], args.shrink_x_proportion,
         args.shrink_x_quantile, FUSED_SERIES_KEY if args.shrink_x_mixed else None)
     if args.plot:
         plot_data(model_df, prec_series, x_inf, x_sup)
-        if args.np_params:
-            t_mesh = np.arange(model_df['t'].iloc[0], model_df['t'].iloc[-1], dtype='datetime64[D]')
-        else:
-            t_mesh = np.arange('2000', '2001', dtype='datetime64[D]')
+        t_mesh = np.arange('2000', '2001', dtype='datetime64[D]')
         plot_params(model_df, t_mesh, param_func)
         
-    period = 24 * (model_df['t'].iloc[-1] - model_df['t'].iloc[0]).days if args.np_params \
-        else PERIOD
-    t_mesh = np.linspace(0, args.year_cycles * period, args.year_cycles * m + 1)
-    delta_t = period / m
+    t_mesh = np.linspace(0, args.year_cycles * PERIOD, args.year_cycles * m + 1)
+    delta_t = PERIOD / m
     scheme_output = build_scheme(param_func, t_mesh, n, m, args.delta_s,
         delta_t, args.np_bcs, args.fd, x_inf=x_inf, x_sup=x_sup, side=args.side)
     if args.np_bcs:
@@ -159,8 +166,7 @@ def main():
         u_array = np.stack(u_vecs, axis=0).reshape((z + 1, m, n - 1))
     print(f'Solving time: {datetime.now() - start_time}')
     plot_results(u_array, x_data, t_mesh, n, m, z, args.delta_s, delta_t, param_func,
-        start_date=model_df['t'].iloc[0] if args.np_params else None,
-        non_periodic=args.np_params, x_inf=x_inf, x_sup=x_sup, side=args.side)
+        start_date=None, non_periodic=False, x_inf=x_inf, x_sup=x_sup, side=args.side)
 
 if __name__ == '__main__':
     main()
