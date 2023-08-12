@@ -1,4 +1,5 @@
 import ast
+import os
 
 import pandas as pd
 import numpy as np
@@ -6,13 +7,51 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from helpers import get_map, scatter_map, configure_plots
+from unami_2009_helpers import prepare_model_df, calculate_param_coeffs
+
+CALCULATE = True
+# CALCULATE = False
+PERIOD = 24 * 365
+PREC_INC = 0.5
+FUSED_DAILY_PATH = 'data/fused_upsampled'
+DATASET = 'fused_daily_orig'
+# DATASET = 'fused_daily_nsrp'
+
+if CALCULATE:
+    pathnames = []
+    for path in os.scandir(FUSED_DAILY_PATH):
+        if DATASET == 'fused_daily_nsrp' and not path.name.startswith('fused_daily_nsrp'):
+            continue
+        if DATASET == 'fused_daily' and not path.name.endswith('it_3000.csv'):
+            continue
+        pathnames.append(path.name)
+
+    loc_list = []
+    beta_coeffs_list = []
+    kappa_coeffs_list = []
+    psi_coeffs_list = []
+    for pathname in pathnames:
+        prec_df = pd.read_csv(f'{FUSED_DAILY_PATH}/{pathname}', index_col=0)
+        prec_series = pd.Series(prec_df.values[:, 0], index=pd.DatetimeIndex(prec_df.index))
+        loc_list.append(ast.literal_eval(prec_df.columns[0]))
+        model_df = prepare_model_df(prec_series, PREC_INC)
+        beta_hats = calculate_param_coeffs(model_df, PERIOD, shift_zero=True)
+        beta_coeffs_list.append(beta_hats['beta'])
+        kappa_coeffs_list.append(beta_hats['kappa'])
+        psi_coeffs_list.append(beta_hats['psi'])
+    pd.DataFrame(beta_coeffs_list, index=loc_list)\
+        .to_csv(f'beta_coeffs_{DATASET}.csv')
+    pd.DataFrame(kappa_coeffs_list, index=loc_list)\
+        .to_csv(f'kappa_coeffs_{DATASET}.csv')
+    pd.DataFrame(psi_coeffs_list, index=loc_list)\
+        .to_csv(f'psi_coeffs_{DATASET}.csv')
 
 # Original daily upsampled
-beta_coeffs_df_orig = pd.read_csv('beta_coeffs_fused_daily.csv',
+beta_coeffs_df_orig = pd.read_csv('beta_coeffs_fused_daily_orig.csv',
     index_col=0, converters={0: ast.literal_eval})
-kappa_coeffs_df_orig = pd.read_csv('kappa_coeffs_fused_daily.csv',
+kappa_coeffs_df_orig = pd.read_csv('kappa_coeffs_fused_daily_orig.csv',
     index_col=0, converters={0: ast.literal_eval})
-psi_coeffs_df_orig = pd.read_csv('psi_coeffs_fused_daily.csv',
+psi_coeffs_df_orig = pd.read_csv('psi_coeffs_fused_daily_orig.csv',
     index_col=0, converters={0: ast.literal_eval})
 # NSRP daily upsampled
 beta_coeffs_df_nsrp = pd.read_csv('beta_coeffs_fused_daily_nsrp.csv',

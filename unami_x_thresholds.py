@@ -10,6 +10,9 @@ from helpers import get_map, scatter_map, prepare_df
 from unami_2009_helpers import prepare_model_df
 
 FUSED_DAILY_PATH = 'data/fused_upsampled'
+# NSRP_DATASET = False
+NSRP_DATASET = True
+X_DF_NAME = 'x_df_nsrp.csv' if NSRP_DATASET else 'x_df.csv'
 PREC_INC = 0.5
 DF_QUANTILES = [0.05, 0.95]
 # DF_QUANTILES = [0.1, 0.9]
@@ -18,9 +21,13 @@ MONTH_QUANTILES = [0.1, 0.9]
 # LOC_QUANTILES = [0.1, 0.9]
 LOC_QUANTILES = [0.05, 0.95]
 
-# monthly_prec_df, _, _ = prepare_df('data/precipitation', 'FusedData.csv', 'prec')
 # x_df = None
-# for i, path in enumerate(os.scandir(FUSED_DAILY_PATH)):
+# i = 0
+# for path in os.scandir(FUSED_DAILY_PATH):
+#     if NSRP_DATASET and not path.name.startswith('fused_daily_nsrp'):
+#         continue
+#     if not NSRP_DATASET and not path.name.endswith('it_3000.csv'):
+#         continue
 #     if i % 25 == 0:
 #         print(i)
 #     prec_df = pd.read_csv(f'{FUSED_DAILY_PATH}/{path.name}', index_col=0)
@@ -32,9 +39,10 @@ LOC_QUANTILES = [0.05, 0.95]
 #     else:
 #         x_series = pd.DataFrame(np.array(model_df['x']), columns=[loc], index=pd.DatetimeIndex(model_df['t']))
 #         x_df = x_df.join(x_series, how='outer')
-# x_df.to_csv('x_df.csv')
+#     i += 1
+# x_df.to_csv(X_DF_NAME)
 
-x_df = pd.read_csv('x_df.csv', index_col=[0])
+x_df = pd.read_csv(X_DF_NAME, index_col=[0])
 x_df.index = index=pd.DatetimeIndex(x_df.index)
 
 df_lower_q = np.nanquantile(x_df, DF_QUANTILES[0])
@@ -82,8 +90,9 @@ extreme_upper_counts = extreme_upper.sum(axis=0)
 extreme_lower_quantiles = extreme_lower_counts / x_df.count(axis=0)
 extreme_upper_quantiles = 1 - extreme_upper_counts / x_df.count(axis=0)
 
-extreme_lower_quantiles.to_csv('x_lower_quantiles.csv')
-extreme_upper_quantiles.to_csv('x_upper_quantiles.csv')
+suffix = 'nsrp' if NSRP_DATASET else 'orig'
+extreme_lower_quantiles.to_csv(f'x_lower_quantiles_{suffix}.csv')
+extreme_upper_quantiles.to_csv(f'x_upper_quantiles_{suffix}.csv')
 
 figure, axes = plt.subplots(1, 2)
 axes = iter(axes.flatten())
