@@ -81,6 +81,14 @@ def main():
     parser.add_argument('--sar_corrected', action='store_true', default=False)
     args = parser.parse_args()
 
+    suffix = 'nsrp' if args.dataset == 'fused_daily_nsrp' else 'orig'
+    if args.shrink_x_mixed:
+        lower_q = pd.read_csv(f'x_lower_quantiles_{suffix}.csv', index_col=0)\
+            .loc[str(FUSED_SERIES_KEY)][0]
+        upper_q = pd.read_csv(f'x_upper_quantiles_{suffix}.csv', index_col=0)\
+            .loc[str(FUSED_SERIES_KEY)][0]
+    else:
+        lower_q, upper_q = None, None
     if args.dataset == 'fused':
         prec_df, _, _ = prepare_df('data/precipitation', 'FusedData.csv', 'prec')
         prec_series_full = pd.Series(prec_df[FUSED_SERIES_KEY], index=pd.DatetimeIndex(prec_df.index))
@@ -103,16 +111,15 @@ def main():
     param_funcs = []
     for df in model_dfs:
         if args.sar_corrected:
-            df_suffix = 'nsrp' if args.dataset == 'fused_daily_nsrp' else 'orig'
-            beta_coeffs_df = pd.read_csv(f'beta_coeffs_fused_daily_{df_suffix}.csv',
+            beta_coeffs_df = pd.read_csv(f'beta_coeffs_fused_daily_{suffix}.csv',
                 index_col=0, converters={0: ast.literal_eval})
             loc_index = list(beta_coeffs_df.index.values).index(FUSED_SERIES_KEY)
             beta_hats = {
-                'beta': pd.read_csv(f'corrected_beta_coeffs_{df_suffix}.csv')\
+                'beta': pd.read_csv(f'corrected_beta_coeffs_{suffix}.csv')\
                     .iloc[loc_index, :].values,
-                'kappa': pd.read_csv(f'corrected_kappa_coeffs_{df_suffix}.csv')\
+                'kappa': pd.read_csv(f'corrected_kappa_coeffs_{suffix}.csv')\
                     .iloc[loc_index, :].values,
-                'psi': pd.read_csv(f'corrected_psi_coeffs_{df_suffix}.csv')\
+                'psi': pd.read_csv(f'corrected_psi_coeffs_{suffix}.csv')\
                     .iloc[loc_index, :].values,
             }
         else:
@@ -129,7 +136,7 @@ def main():
         axes = iter(axes.flatten())
         for df in model_dfs:
             x_inf, x_sup = get_x_domain(df['x'], args.shrink_x_proportion,
-                args.shrink_x_quantile, FUSED_SERIES_KEY if args.shrink_x_mixed else None)
+                args.shrink_x_quantile, lower_q, upper_q)
             x_median = df['x'].median()
             axis = next(axes)
             axis.plot(df['s'], df['x'], 'ko-')
@@ -205,6 +212,7 @@ def main():
         floor(n / 10),
         floor(n / 5),
         floor(n / 2),
+        floor(4*n / 5),
         floor(9*n / 10),
     ]
     last_cdf = np.zeros((len(TIME_BLOCKS), 12, len(x_indices)))
@@ -215,7 +223,7 @@ def main():
     for block_i, b in enumerate(TIME_BLOCKS):
         x_data = np.array(model_dfs[block_i]['x'])
         x_inf, x_sup = get_x_domain(x_data, args.shrink_x_proportion,
-            args.shrink_x_quantile, FUSED_SERIES_KEY if args.shrink_x_mixed else None)
+            args.shrink_x_quantile, lower_q, upper_q)
         param_func = param_funcs[block_i]
         t_mesh = np.linspace(0, args.year_cycles * PERIOD, args.year_cycles * m + 1)
         delta_t = PERIOD / m
@@ -226,38 +234,42 @@ def main():
         else:
             A_mat, G_mats = scheme_output
 
-        print(f'Time block {b[0]} to {b[1]}: solving linear systems:')
+        print(f'Time block {b[0]} to {b[1]}: solving linear systems...')
+        year_cycles = args.year_cycles if args.np_bcs else 1
+        x_size = n if args.side else n - 1
+        u_array = np.zeros((z + 1, year_cycles * m, x_size))
+        u_array[0, :, :] = 1  # BC of 1 at s = 0
         if args.np_bcs:
-            u_array = np.zeros((z + 1, args.year_cycles * m, n - 1))
-            u_array[0, :, :] = 1
-            u_array[:, 0, :] = 1
-            # Solve iteratively for each s and t
-            for i in range(1, z + 1):
-                if i % 10 == 0:
-                    print(i, '/', z)
-                for j in range(1, args.year_cycles * m):
-                    b_vec = None
-                    t_index = j
-                    while b_vec is None:
-                        try:
-                            b_vec = G_mats[t_index] @ u_array[i - 1, j, :] + H_mats[t_index] @ u_array[i, j - 1, :]
-                            u_array[i, j, :] = spsolve(M_mats[t_index], b_vec)
-                        except IndexError:
-                            t_index -= m
-        else:
-            u_vecs = [np.ones(m * (n - 1))]
-            # Solve iteratively for each s
-            for i in range(z):
-                if i % 10 == 0:
-                    print(i, '/', z)
-                b_vec = np.zeros((m * (n - 1), 1))
+            u_array[:, 0, :] = 1  # BC of 1 at t = 0
+        for i in range(1, z + 1):
+            if i % 10 == 0:
+                print(i, '/', z)
+            if args.np_bcs:
+                # Solve iteratively for each s and t
+                for i in range(1, z + 1):
+                    if i % 10 == 0:
+                        print(i, '/', z)
+                    for j in range(1, year_cycles * m):
+                        b_vec = None
+                        t_index = j
+                        while b_vec is None:
+                            try:
+                                b_vec = G_mats[t_index] @ u_array[i - 1, j, :] + H_mats[t_index] @ u_array[i, j - 1, :]
+                                u_array[i, j, :] = spsolve(M_mats[t_index], b_vec)
+                            except IndexError:
+                                t_index -= m
+            else:
+                # Solve iteratively for each s
+                b_vec = np.zeros((m * x_size, 1))
                 for j in range(m):
-                    start = j*(n - 1)
-                    end = start + n - 1
-                    b_vec[start : end] = (G_mats[j] @ u_vecs[i][start : end]).reshape((n - 1, 1))
+                    start = j * x_size
+                    end = (j + 1) * x_size
+                    b_vec[start : end] = G_mats[j] @ u_array[i - 1, j, :].reshape((x_size, 1))
                 u_vec = spsolve(A_mat, b_vec)
-                u_vecs.append(u_vec)
-            u_array = np.stack(u_vecs, axis=0).reshape((z + 1, m, n - 1))
+                for j in range(m):
+                    start = j * x_size
+                    end = (j + 1) * x_size
+                    u_array[i, j, :] = u_vec[start : end]
         if args.plot:
             plot_results(u_array, x_data, t_mesh, n, m, z, args.delta_s, delta_t, param_func,
                 x_inf=x_inf, x_sup=x_sup)
@@ -271,7 +283,7 @@ def main():
                 pdf = [(cdf[i + 1] - cdf[i]) / args.delta_s for i in range(len(cdf) - 1)]
                 last_cdf[block_i, j, k] = cdf[-1]
                 mean[block_i, j, k] = None if cdf[-1] == 0 else \
-                    np.sum([s_mesh[i] * p * args.delta_s / cdf[-1] for i, p in enumerate(pdf)])
+                    np.sum([s_mesh[i] * p * args.delta_s for i, p in enumerate(pdf)])
                 median[block_i, j, k] = None if cdf[-1] < 0.5 \
                     else np.argwhere(cdf >= 0.5)[0, 0] * args.delta_s
                 mode[block_i, j, k] = np.argmax(pdf) * args.delta_s

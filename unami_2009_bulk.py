@@ -208,18 +208,27 @@ def main():
             M_mats, G_mats, H_mats = scheme_output
         else:
             A_mat, G_mats = scheme_output
-        u_vecs = [np.ones(m * (n - 1))]
-        print(f'Series {s} / {len(prec_series_list)}: solving linear systems:')
-        if not args.read_folder and args.np_bcs:
-            u_array = np.zeros((z + 1, args.year_cycles * m, n)) if args.side \
-                else np.zeros((z + 1, args.year_cycles * m, n - 1))
-            u_array[0, :, :] = 1
-            u_array[:, 0, :] = 1
-            # Solve iteratively for each s and t
-            for i in range(1, z + 1):
-                if i % 10 == 0:
-                    print(i, '/', z)
-                for j in range(1, args.year_cycles * m):
+        
+        print(f'({s + 1} / {len(prec_series_list)}) Solving linear systems for {str(loc)}...')
+        year_cycles = args.year_cycles if args.np_bcs else 1
+        x_size = n if args.side else n - 1
+        u_array = np.zeros((z + 1, year_cycles * m, x_size))
+        u_array[0, :, :] = 1  # BC of 1 at s = 0
+        if args.np_bcs:
+            u_array[:, 0, :] = 1  # BC of 1 at t = 0
+        for i in range(1, z + 1):
+            if i > 1 and args.solution_tol_exit:
+                solution_diff = ((u_array[i, -m:, :] - u_array[i - 1, -m:, :]) ** 2)\
+                    .sum(axis=(0, 1))
+                if solution_diff < args.solution_tol:
+                    for _i in range(i + 1, z + 1):
+                        u_array[_i, :, :] = u_array[i, :, :]
+                    break
+            if i % 10 == 0:
+                print(i, '/', z)
+            if args.np_bcs:
+                # Solve iteratively for each s and t
+                for j in range(1, year_cycles * m):
                     b_vec = None
                     t_index = j
                     while b_vec is None:
@@ -228,19 +237,18 @@ def main():
                             u_array[i, j, :] = spsolve(M_mats[t_index], b_vec)
                         except IndexError:
                             t_index -= m
-        elif not args.read_folder:
-            # TODO: handle one-sided
-            for i in range(z):
-                if i % 10 == 0:
-                    print(i, '/', z)
-                b_vec = np.zeros((m * (n - 1), 1))
+            else:
+                # Solve iteratively for each s
+                b_vec = np.zeros((m * x_size, 1))
                 for j in range(m):
-                    start = j*(n - 1)
-                    end = start + n - 1
-                    b_vec[start : end] = (G_mats[j] @ u_vecs[i][start : end]).reshape((n - 1, 1))
+                    start = j * x_size
+                    end = (j + 1) * x_size
+                    b_vec[start : end] = G_mats[j] @ u_array[i - 1, j, :].reshape((x_size, 1))
                 u_vec = spsolve(A_mat, b_vec)
-                u_vecs.append(u_vec)
-            u_array = np.stack(u_vecs, axis=0).reshape((z + 1, m, n - 1))
+                for j in range(m):
+                    start = j * x_size
+                    end = (j + 1) * x_size
+                    u_array[i, j, :] = u_vec[start : end]
         u_last_cycle = u_array[:, -m:, :]
         # The mean gives expected value of s such that X_s exits the [x_inf, x_sup] domain
         # This requires solving with high enough s that a steady state probability is reached

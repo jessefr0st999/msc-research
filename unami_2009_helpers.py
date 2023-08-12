@@ -244,7 +244,7 @@ def plot_params(model_df, t_mesh, param_func):
 
 
 def build_scheme(param_func, t_mesh, n, m, delta_s, delta_t, non_periodic=False,
-        fwd_diff=False, x_inf=None, x_sup=None, side=None):
+        x_inf=None, x_sup=None, side=None):
     delta_x = (x_sup - x_inf) / n
     x_mesh = np.linspace(x_inf, x_sup, n + 1)
 
@@ -258,7 +258,6 @@ def build_scheme(param_func, t_mesh, n, m, delta_s, delta_t, non_periodic=False,
         return _K(t) * (_beta(t) - x) * delta_x / _v(t, x)
     
     M_mats = [np.zeros((n + 1, n + 1, 4)) for _ in range(m)]
-    print('Setting up linear systems...')
     for k in range(n + 1):
         x_km1 = x_mesh[k - 1] if k > 0 else None
         x_k = x_mesh[k]
@@ -330,8 +329,8 @@ def build_scheme(param_func, t_mesh, n, m, delta_s, delta_t, non_periodic=False,
             if k < n:
                 M_mats[j][k, k + 1, 3] = 1/2
 
-    # For one-sided, there is a Dirichlet BC at the given end and a Neumann
-    # BC at the other end, so keep the other end's term in the scheme
+    # For one-sided, there is a Dirichlet BC at the given x end and a Neumann
+    # BC at the other x end, so keep the other end's term in the scheme
     # For two-sided, both ends have Dirichlet BCs, so remove both ends' terms
     sliced_M_mats = []
     for mat in M_mats:
@@ -341,31 +340,32 @@ def build_scheme(param_func, t_mesh, n, m, delta_s, delta_t, non_periodic=False,
             sliced_M_mats.append(mat[:n, :n, :])
         else:
             sliced_M_mats.append(mat[1 : n, 1 : n, :])
+    # M_mat: at current t and current s, indexed by x
+    # G_mat: at current t and previous s, indexed by x
+    # H_mat: at next t and current s, indexed by x
     G_mats = [mat[:, :, 0] for mat in sliced_M_mats]
     H_mats = [mat[:, :, 1] for mat in sliced_M_mats]
-    sliced_M_mats = [mat.sum(axis=2) if fwd_diff or non_periodic \
-        else mat[:, :, np.r_[0, 2:4]].sum(axis=2) for mat in sliced_M_mats]
+    sliced_M_mats = [mat.sum(axis=2) for mat in sliced_M_mats]
     if non_periodic:
         return sliced_M_mats, G_mats, H_mats
 
-    # Create LHS matrix
-    # TODO: handle one-sided
-    A_mat = np.zeros((m * (n - 1), m * (n - 1)))
+    # Create the LHS matrix for the periodic BCs case, where each row of
+    # sub-matrices represents the system at a value of
+    # TODO: check that this correctly implements one-sided for periodic BCs
+    x_size = n if side else n - 1
+    A_mat = np.zeros((m * x_size, m * x_size))
+    # A_mat: at current s, indexed by t and x
     for j in range(m):
-        start = j*(n - 1)
-        end = start + n - 1
-        A_mat[start : end, start : end] = M_mats[j]
-        if j >= 1 and not fwd_diff:
-            A_mat[start : end, start - (n - 1) : end - (n - 1)] = 0.5 * H_mats[j - 1]
+        start = j * x_size
+        end = (j + 1) * x_size
+        A_mat[start : end, start : end] = sliced_M_mats[j]
+        if j >= 1:
+            A_mat[start : end, start - x_size : end - x_size] = 0.5 * H_mats[j - 1]
         if j <= m - 2:
-            A_mat[start : end, start + n - 1 : end + n - 1] = -H_mats[j + 1] if fwd_diff \
-                else -0.5 * H_mats[j + 1]
+            A_mat[start : end, start + x_size : end + x_size] = -0.5 * H_mats[j + 1]
     # Periodic boundary condition
-    if fwd_diff:
-        A_mat[(m - 1)*(n - 1) : m*(n - 1), 0 : n - 1] = -H_mats[0]
-    else:
-        A_mat[0 : n - 1, (m - 1)*(n - 1) : m*(n - 1)] = 0.5 * H_mats[m - 1]
-        A_mat[(m - 1)*(n - 1) : m*(n - 1), 0 : n - 1] = -0.5 * H_mats[0]
+    A_mat[0 : x_size, (m - 1) * x_size : m * x_size] = 0.5 * H_mats[m - 1]
+    A_mat[(m - 1) * x_size : m * x_size, 0 : x_size] = -0.5 * H_mats[0]
     return A_mat, G_mats
     
 

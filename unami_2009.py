@@ -8,8 +8,8 @@ from scipy.sparse.linalg import spsolve
 
 from helpers import prepare_df
 from unami_2009_helpers import prepare_model_df, calculate_param_coeffs, \
-    calculate_param_func, plot_data, \
-    plot_params, build_scheme, plot_results, get_x_domain
+    calculate_param_func, plot_data, plot_params, \
+    build_scheme, plot_results, get_x_domain
 
 np.random.seed(0)
 np.set_printoptions(suppress=True)
@@ -50,7 +50,6 @@ def main():
     parser.add_argument('--s_steps', type=int, default=100)
     parser.add_argument('--delta_s', type=float, default=10)
     parser.add_argument('--plot', action='store_true', default=False)
-    parser.add_argument('--fd', action='store_true', default=False)
     parser.add_argument('--deseasonalise', action='store_true', default=False)
     parser.add_argument('--np_bcs', action='store_true', default=False)
     parser.add_argument('--shrink_x_proportion', type=float, default=None)
@@ -63,6 +62,7 @@ def main():
     parser.add_argument('--sar_corrected', action='store_true', default=False)
     args = parser.parse_args()
 
+    suffix = 'nsrp' if args.dataset == 'fused_daily_nsrp' else 'orig'
     if args.dataset == 'fused':
         prec_df, _, _ = prepare_df('data/precipitation', 'FusedData.csv', 'prec')
         prec_series = pd.Series(prec_df[FUSED_SERIES_KEY], index=pd.DatetimeIndex(prec_df.index))
@@ -96,33 +96,40 @@ def main():
     z = args.s_steps
     x_data = np.array(model_df['x'])
     if args.sar_corrected:
-        df_suffix = 'nsrp' if args.dataset == 'fused_daily_nsrp' else 'orig'
-        beta_coeffs_df = pd.read_csv(f'beta_coeffs_fused_daily_{df_suffix}.csv',
+        beta_coeffs_df = pd.read_csv(f'beta_coeffs_fused_daily_{suffix}.csv',
             index_col=0, converters={0: ast.literal_eval})
         loc_index = list(beta_coeffs_df.index.values).index(FUSED_SERIES_KEY)
         beta_hats = {
-            'beta': pd.read_csv(f'corrected_beta_coeffs_{df_suffix}.csv')\
+            'beta': pd.read_csv(f'corrected_beta_coeffs_{suffix}.csv')\
                 .iloc[loc_index, :].values,
-            'kappa': pd.read_csv(f'corrected_kappa_coeffs_{df_suffix}.csv')\
+            'kappa': pd.read_csv(f'corrected_kappa_coeffs_{suffix}.csv')\
                 .iloc[loc_index, :].values,
-            'psi': pd.read_csv(f'corrected_psi_coeffs_{df_suffix}.csv')\
+            'psi': pd.read_csv(f'corrected_psi_coeffs_{suffix}.csv')\
                 .iloc[loc_index, :].values,
         }
     else:
         beta_hats = calculate_param_coeffs(model_df, PERIOD, shift_zero=True)
     param_func = calculate_param_func(model_df, PERIOD, beta_hats,
         trend_polynomial=args.trend_polynomial)
+    if args.shrink_x_mixed:
+        lower_q = pd.read_csv(f'x_lower_quantiles_{suffix}.csv', index_col=0)\
+            .loc[str(FUSED_SERIES_KEY)][0]
+        upper_q = pd.read_csv(f'x_upper_quantiles_{suffix}.csv', index_col=0)\
+            .loc[str(FUSED_SERIES_KEY)][0]
+    else:
+        lower_q, upper_q = None, None
     x_inf, x_sup = get_x_domain(model_df['x'], args.shrink_x_proportion,
-        args.shrink_x_quantile, FUSED_SERIES_KEY if args.shrink_x_mixed else None)
+        args.shrink_x_quantile, lower_q, upper_q)
     if args.plot:
         plot_data(model_df, prec_series, x_inf, x_sup)
         t_mesh = np.arange('2000', '2001', dtype='datetime64[D]')
         plot_params(model_df, t_mesh, param_func)
         
-    t_mesh = np.linspace(0, args.year_cycles * PERIOD, args.year_cycles * m + 1)
+    year_cycles = args.year_cycles if args.np_bcs else 1
+    t_mesh = np.linspace(0, year_cycles * PERIOD, year_cycles * m + 1)
     delta_t = PERIOD / m
     scheme_output = build_scheme(param_func, t_mesh, n, m, args.delta_s,
-        delta_t, args.np_bcs, args.fd, x_inf=x_inf, x_sup=x_sup, side=args.side)
+        delta_t, args.np_bcs, x_inf=x_inf, x_sup=x_sup, side=args.side)
     if args.np_bcs:
         M_mats, G_mats, H_mats = scheme_output
     else:
@@ -130,16 +137,17 @@ def main():
 
     start_time = datetime.now()
     print('Solving linear systems:')
+    x_size = n if args.side else n - 1
+    u_array = np.zeros((z + 1, year_cycles * m, x_size))
+    u_array[0, :, :] = 1  # BC of 1 at s = 0
     if args.np_bcs:
-        u_array = np.zeros((z + 1, args.year_cycles * m, n)) if args.side \
-            else np.zeros((z + 1, args.year_cycles * m, n - 1))
-        u_array[0, :, :] = 1
-        u_array[:, 0, :] = 1
-        # Solve iteratively for each s and t
-        for i in range(1, z + 1):
-            if i % 10 == 0:
-                print(i, '/', z)
-            for j in range(1, args.year_cycles * m):
+        u_array[:, 0, :] = 1  # BC of 1 at t = 0
+    for i in range(1, z + 1):
+        if i % 10 == 0:
+            print(i, '/', z)
+        if args.np_bcs:
+            # Solve iteratively for each s and t
+            for j in range(1, year_cycles * m):
                 b_vec = None
                 t_index = j
                 while b_vec is None:
@@ -149,21 +157,18 @@ def main():
                         u_array[i, j, :] = spsolve(M_mats[t_index], b_vec)
                     except IndexError:
                         t_index -= m
-    else:
-        # TODO: handle one-sided
-        u_vecs = [np.ones(m * (n - 1))]
-        # Solve iteratively for each s
-        for i in range(z):
-            if i % 10 == 0:
-                print(i, '/', z)
-            b_vec = np.zeros((m * (n - 1), 1))
+        else:
+            # Solve iteratively for each s
+            b_vec = np.zeros((m * x_size, 1))
             for j in range(m):
-                start = j*(n - 1)
-                end = start + n - 1
-                b_vec[start : end] = (G_mats[j] @ u_vecs[i][start : end]).reshape((n - 1, 1))
+                start = j * x_size
+                end = (j + 1) * x_size
+                b_vec[start : end] = G_mats[j] @ u_array[i - 1, j, :].reshape((x_size, 1))
             u_vec = spsolve(A_mat, b_vec)
-            u_vecs.append(u_vec)
-        u_array = np.stack(u_vecs, axis=0).reshape((z + 1, m, n - 1))
+            for j in range(m):
+                start = j * x_size
+                end = (j + 1) * x_size
+                u_array[i, j, :] = u_vec[start : end]
     print(f'Solving time: {datetime.now() - start_time}')
     plot_results(u_array, x_data, t_mesh, n, m, z, args.delta_s, delta_t, param_func,
         start_date=None, non_periodic=False, x_inf=x_inf, x_sup=x_sup, side=args.side)
