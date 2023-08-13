@@ -448,11 +448,6 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
         axis.legend()
     plt.show()
 
-    print(max_prob)
-    print(mean)
-    print(median)
-    print(mode)
-
     figure, axes = plt.subplots(3, 4)
     axes = iter(axes.flatten())
     u_min = np.Inf
@@ -508,9 +503,7 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
     plt.show()
 
 
-EXTREME_LOWER_QUANTILES = pd.read_csv('x_lower_quantiles.csv', index_col=0)
-EXTREME_UPPER_QUANTILES = pd.read_csv('x_upper_quantiles.csv', index_col=0)
-def get_x_domain(x_series, shrink_x_proportion, shrink_x_quantile, loc):
+def get_x_domain(x_series, shrink_x_proportion, shrink_x_quantile, lower_q, upper_q):
     if shrink_x_proportion:
         shrinkage = (x_series.max() - x_series.min()) / shrink_x_proportion
         x_sup = x_series.max() - shrinkage
@@ -518,9 +511,9 @@ def get_x_domain(x_series, shrink_x_proportion, shrink_x_quantile, loc):
     elif shrink_x_quantile:
         x_sup = np.quantile(x_series, 1 - shrink_x_quantile)
         x_inf = np.quantile(x_series, shrink_x_quantile)
-    elif loc:
-        x_sup = np.quantile(x_series, EXTREME_UPPER_QUANTILES.loc[str(loc)][0])
-        x_inf = np.quantile(x_series, EXTREME_LOWER_QUANTILES.loc[str(loc)][0])
+    elif lower_q and upper_q:
+        x_sup = np.quantile(x_series, upper_q)
+        x_inf = np.quantile(x_series, lower_q)
     else:
         x_sup = x_series.max()
         x_inf = x_series.min()
