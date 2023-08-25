@@ -503,21 +503,27 @@ def plot_results(u_array, x_data, t_mesh, n, m, z, delta_s, delta_t, param_func,
     plt.show()
 
 
-def get_x_domain(x_series, shrink_x_proportion, shrink_x_quantile, lower_q, upper_q):
-    if shrink_x_proportion:
-        shrinkage = (x_series.max() - x_series.min()) / shrink_x_proportion
+def get_x_domain(x_series, proportion=None, quantile=None, lower_q=None, upper_q=None):
+    if proportion:
+        shrinkage = (x_series.max() - x_series.min()) / proportion
         x_sup = x_series.max() - shrinkage
-        x_inf = x_series.min() + shrinkage
-    elif shrink_x_quantile:
-        x_sup = np.quantile(x_series, 1 - shrink_x_quantile)
-        x_inf = np.quantile(x_series, shrink_x_quantile)
-    elif lower_q and upper_q:
+    elif quantile:
+        x_sup = np.quantile(x_series, 1 - quantile)
+    elif lower_q is not None and upper_q is not None:
         x_sup = np.quantile(x_series, upper_q)
-        x_inf = np.quantile(x_series, lower_q)
     else:
         x_sup = x_series.max()
-        x_inf = x_series.min()
-    return x_inf, x_sup
+    # Extreme x_sup:
+    # Calculations for x consider the rainfall to be delivered uniformly throughout
+    # a given day; instead suppose all such rainfall is delivered in a single hour
+    # Hence, add log(24) to x = log(ds/dt)
+    # Extreme x_inf:
+    # Since the procedure for calculating x asks how long it has been since prec_inc
+    # of rainfall has fallen, long time intervals are taken in account
+    # However, for a given drought, the actual value is closest to the worst recorded
+    # value (as seen by sequentially increasing t_delta)
+    # Hence apply a stricter quantile or just take the minimum value
+    return np.quantile(x_series, 0.005), x_sup + np.log(24)
 
 
 # def phi(x, t, k):
