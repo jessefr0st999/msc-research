@@ -40,11 +40,9 @@ def prepare_model_df(prec_series, prec_inc, ds_period=None):
             t_delta = 24 * (times[i] - times[i_prev]).days
         ######################################################
         # print(times[i].strftime('%Y_%m_%d'), i, i - i_prev, round(s), round(cum_sums[i_prev]),
-        #     int((s - cum_sums[i_prev]) // prec_inc), round(t_delta, 2))
+        #     round((s - cum_sums[i_prev]) / prec_inc), round(t_delta, 2))
         ######################################################
-        # Add a small amount of noise to prevent consecutive x-values being equal, which
-        # causes log of zero in the parameter estimation
-        x = np.log(prec_inc / t_delta) + np.random.normal(0, 0.1)
+        x = np.log(prec_inc / t_delta)
         model_df_values.append((s, times[i], x, t_delta))
     model_df = pd.DataFrame(model_df_values)
     model_df.columns = ['s', 't', 'x', 't_delta']
@@ -75,16 +73,24 @@ def detrend_x(x_series, rolling=None, polynomial=1):
 # functions as polynomials in x multiplied by sin/cos in t
 # Number of least squares coefficients estimated for each parameter is (n_X + 1) * (1 + 2*n_t)
 def calculate_param_coeffs(model_df, period, shift_zero=False, param_info=None):
-    n = model_df.shape[0] - 1
-    x_data = np.array(model_df['x'])
-    s_data = np.array(model_df['s'])
     model_df['t'] = pd.to_datetime(model_df['t'])
+    # Remove rows with consecutive x values
+    indices_to_keep = []
+    x_prev = None
+    for i, x in enumerate(model_df['x']):
+        if x != x_prev:
+            indices_to_keep.append(i)
+        x_prev = x
+    x_data = np.array(model_df['x'][indices_to_keep])
+    s_data = np.array(model_df['s'][indices_to_keep])
+    t_data = model_df['t'][indices_to_keep]
+    n = len(x_data) - 1
     if shift_zero:
         # Zero for time at 1 January
-        t_0 = datetime(model_df['t'][0].year, 1, 1)
+        t_0 = datetime(t_data[0].year, 1, 1)
     else:
-        t_0 = model_df['t'][0]
-    t_data = np.array([(t - t_0).days * 24 for t in model_df['t']])
+        t_0 = t_data[0]
+    t_data = np.array([(t - t_0).days * 24 for t in t_data])
     X_mats = {}
     beta_hats = {}
     def beta_f_hat(x, x_p, s, s_p):
