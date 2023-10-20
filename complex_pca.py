@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--output_folder', default=None)
     parser.add_argument('--data_dir', default='data/precipitation')
     parser.add_argument('--data_file', default='FusedData.csv')
-    parser.add_argument('--pcs_to_plot', type=int, default=4)
+    parser.add_argument('--pcs_to_plot', type=int, default=1)
     args = parser.parse_args()
     label_size, font_size, show_or_save = configure_plots(args)
 
@@ -63,31 +63,30 @@ def main():
     pcs_time_amp = np.abs(pcs_time)
     
     lats, lons = zip(*df.columns)
+    dates = df.index.values
     for i in range(args.pcs_to_plot):
-        if i % 2 == 0:
-            figure, axes = plt.subplots(2, 4, layout='compressed')
-            axes = iter(axes.flatten())
+        figure, axes = plt.subplots(1, 2, layout='compressed')
+        axes = iter(axes.flatten())
         percent_var = np.round(100 * prop_vars[i], 2)
         axis = next(axes)
         _map = get_map(axis, region=map_region)
         mx, my = _map(lons, lats)
-        scatter_map(axis, mx, my, pcs_spatial_phase[:, i], cb_fs=label_size, cmap='RdYlBu_r')
+        scatter_map(axis, mx, my, pcs_spatial_phase[:, i], cb_fs=label_size, cmap='hsv')
         axis.set_title(f'PC{i + 1} ({percent_var}%) spatial phase')
-        
         axis = next(axes)
         _map = get_map(axis, region=map_region)
-        scatter_map(axis, mx, my, pcs_spatial_amp[:, i], cb_fs=label_size, cmap='RdYlBu_r')
+        scatter_map(axis, mx, my, pcs_spatial_amp[:, i], cb_fs=label_size, cmap='inferno_r')
         axis.set_title(f'PC{i + 1} ({percent_var}%) spatial amplitude')
         
+        figure, axes = plt.subplots(2, 1, layout='compressed')
+        axes = iter(axes.flatten())
         axis = next(axes)
-        axis.plot(pcs_time_phase[:, i])
+        axis.plot(dates, pcs_time_phase[:, i])
         axis.set_title(f'PC{i + 1} ({percent_var}%) temporal phase')
-        
         axis = next(axes)
-        axis.plot(pcs_time_amp[:, i])
+        axis.plot(dates, pcs_time_amp[:, i])
         axis.set_title(f'PC{i + 1} ({percent_var}%) temporal amplitude')
-        if i % 2 == 1:
-            show_or_save(figure, f'{dataset}_complex_pc_{i}_pc_{i + 1}.png')
+        plt.show()
 
 if __name__ == '__main__':
     start = datetime.now()

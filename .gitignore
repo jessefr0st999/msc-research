@@ -3,7 +3,8 @@
 __pycache__
 data
 data_unfused
-outputs
+networks_outputs
+unami_outputs
 unami_results
 basemap-*
 geckodriver*
@@ -12,3 +13,4 @@ images/*
 *.pkl
 *.csv
 .ipynb_checkpoints
+.Rhistory

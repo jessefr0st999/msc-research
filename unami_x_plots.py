@@ -8,7 +8,6 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy.stats import skew
-np.random.seed(0)
 
 from helpers import get_map, scatter_map, prepare_df, configure_plots
 from unami_2009_helpers import prepare_model_df, calculate_param_func, \
@@ -23,12 +22,9 @@ NUM_BOM_SAMPLES = 1000
 def main():
     np.random.seed(0)
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', default='fused')
-    parser.add_argument('--prec_inc', type=float, default=0.5)
+    parser.add_argument('--dataset', default='fused_daily_nsrp')
+    parser.add_argument('--prec_inc', type=float, default=0.2)
     parser.add_argument('--sar_corrected', action='store_true', default=False)
-    parser.add_argument('--shrink_x_proportion', type=float, default=None)
-    parser.add_argument('--shrink_x_quantile', type=float, default=None)
-    parser.add_argument('--shrink_x_mixed', action='store_true', default=False)
     args = parser.parse_args()
     
     suffix = 'nsrp' if args.dataset == 'fused_daily_nsrp' else 'orig'
@@ -59,7 +55,7 @@ def main():
         info_df = pd.read_csv('bom_info.csv', index_col=0, converters={0: ast.literal_eval})
         filenames = set(info_df.sample(NUM_BOM_SAMPLES)['filename'])
         for path in os.scandir(BOM_DAILY_PATH):
-            if not path.is_file() or (args.num_samples and path.name not in filenames):
+            if not path.is_file() or path.name not in filenames:
                 continue
             prec_df = pd.read_csv(f'{BOM_DAILY_PATH}/{path.name}')
             prec_df = prec_df.dropna(subset=['Rain'])
@@ -102,8 +98,8 @@ def main():
     #     [-6.5, 0],
     # ]
     monthly_means = [[] for _ in range(12)]
-    x_inf_list = []
-    x_sup_list = []
+    monthly_q1 = [[] for _ in range(12)]    
+    monthly_medians = [[] for _ in range(12)]    
     trend_list = []
     for s, prec_series in enumerate(prec_series_list):
         if s % 25 == 0:
@@ -122,6 +118,10 @@ def main():
             #     t.month == m + 1 for t in prec_series.index]].mean())
             monthly_means[m].append(model_df.loc[[
                 t.month == m + 1 for t in model_df.index]]['x'].mean())
+            monthly_q1[m].append(np.quantile(model_df.loc[[
+                t.month == m + 1 for t in model_df.index]]['x'], 0.25))
+            monthly_medians[m].append(np.quantile(model_df.loc[[
+                t.month == m + 1 for t in model_df.index]]['x'], 0.5))
                         
         if args.sar_corrected:
             beta_coeffs_df = pd.read_csv(f'beta_coeffs_fused_daily_{suffix}.csv',
@@ -137,19 +137,7 @@ def main():
             }
         else:
             beta_hats = calculate_param_coeffs(model_df, PERIOD, shift_zero=True)
-        model_df = prepare_model_df(prec_series, args.prec_inc)
         param_func = calculate_param_func(model_df, PERIOD, beta_hats)
-        lower_q_df = pd.read_csv(f'x_lower_quantiles_{suffix}.csv', index_col=0)
-        upper_q_df = pd.read_csv(f'x_upper_quantiles_{suffix}.csv', index_col=0)
-        if args.shrink_x_mixed:
-            lower_q = lower_q_df.loc[str(loc)][0]
-            upper_q = upper_q_df.loc[str(loc)][0]
-        else:
-            lower_q, upper_q = None, None
-        x_inf, x_sup = get_x_domain(model_df['x'], args.shrink_x_proportion,
-            args.shrink_x_quantile, lower_q, upper_q)
-        x_inf_list.append(x_inf)
-        x_sup_list.append(x_sup)
         x_deseasonalised = deseasonalise_x(model_df, param_func)
         x_detrended = detrend_x(x_deseasonalised, polynomial=1)
         trend = x_deseasonalised - x_detrended
@@ -162,8 +150,8 @@ def main():
         axis = next(axes)
         _map = get_map(axis)
         mx, my = _map(lons, lats)
-        axis.set_title(f'x {series_name}')
-        scatter_map(axis, mx, my, series, size_func=lambda x: 15,
+        axis.set_title(f'{series_name}')
+        scatter_map(axis, mx, my, series, size_func=lambda x: 30, cmap='inferno_r',
             cb_min=series_min_max[series_name][0],
             cb_max=series_min_max[series_name][1])
             # cb_min=np.min(series), cb_max=np.max(series))
@@ -175,36 +163,43 @@ def main():
         axis = next(axes)
         _map = get_map(axis)
         mx, my = _map(lons, lats)
-        axis.set_title(f'prec {datetime(2000, m + 1, 1).strftime("%b")} mean')
-        scatter_map(axis, mx, my, series, size_func=lambda x: 15,
-            cb_min=np.min(series), cb_max=np.max(series))
+        axis.set_title(f'{datetime(2000, m + 1, 1).strftime("%b")} mean')
+        scatter_map(axis, mx, my, series, size_func=lambda x: 12,
+            cb_min=-9, cb_max=0, cmap='inferno_r')
+            # cb_min=np.min(series), cb_max=np.max(series))
             # cb_min=month_min_max[m][0], cb_max=month_min_max[m][1])
     plt.show()
-         
-    figure, axes = plt.subplots(1, 3, layout='compressed')
+    
+    figure, axes = plt.subplots(3, 4, layout='compressed')
     axes = iter(axes.flatten())
-    axis = next(axes)
-    _map = get_map(axis)
-    mx, my = _map(lons, lats)
-    axis.set_title('x_inf')
-    series = np.array(x_sup_list)
-    scatter_map(axis, mx, my, series, size_func=lambda x: 15,
-        cb_min=series.min(), cb_max=series.max())
+    for m, series in enumerate(monthly_q1):
+        axis = next(axes)
+        _map = get_map(axis)
+        mx, my = _map(lons, lats)
+        axis.set_title(f'{datetime(2000, m + 1, 1).strftime("%b")} q1')
+        scatter_map(axis, mx, my, series, size_func=lambda x: 12,
+            cb_min=np.min(series), cb_max=np.max(series), cmap='inferno_r')
+    plt.show()
     
-    axis = next(axes)
-    _map = get_map(axis)
-    axis.set_title('x_sup')
-    series = np.array(x_inf_list)
-    scatter_map(axis, mx, my, series, size_func=lambda x: 15,
-        cb_min=series.min(), cb_max=series.max())
-    
-    axis = next(axes)
+    figure, axes = plt.subplots(3, 4, layout='compressed')
+    axes = iter(axes.flatten())
+    for m, series in enumerate(monthly_medians):
+        axis = next(axes)
+        _map = get_map(axis)
+        mx, my = _map(lons, lats)
+        axis.set_title(f'{datetime(2000, m + 1, 1).strftime("%b")} median')
+        scatter_map(axis, mx, my, series, size_func=lambda x: 12,
+            cb_min=-10, cb_max=0, cmap='inferno_r')
+            # cb_min=np.min(series), cb_max=np.max(series))
+    plt.show()
+         
+    figure, axis = plt.subplots(1, 3, layout='compressed')
     _map = get_map(axis)
     axis.set_title('linear trend')
     series = np.array(trend_list)
     scatter_map(axis, mx, my, series, size_func=lambda x: 15,
         cb_min=-np.abs(series).max(),
-        cb_max=np.abs(series).max())
+        cb_max=np.abs(series).max(), cmap='inferno')
     plt.show()
 
 if __name__ == '__main__':

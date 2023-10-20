@@ -24,7 +24,7 @@ PLOT_SCALES = {
     # 'degree': [0, 80],
     # 'weighted_degree': [0, 850],
     'degree': [0, 60],
-    'weighted_degree': [0, 700],
+    'weighted_degree': [250, 750],
     'betweenness_centrality': [0, 0.18],
     'closeness_centrality': [0, 0.12],
 }
@@ -56,10 +56,13 @@ def main():
     closeness_centrality_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_c_cent.pkl')
     # eigenvector_centrality_df = pd.read_pickle(f'{METRICS_DIR}/{args.metrics_file_base}_e_cent.pkl')
     lats, lons = zip(*degree_df.columns)
+    # dfs = [coreness_df, degree_df, weighted_degree_df, eccentricity_df,
+    #     shortest_path_df, local_link_distance_df,
+    #     betweenness_centrality_df, closeness_centrality_df]
     dfs = [degree_df, weighted_degree_df, betweenness_centrality_df, closeness_centrality_df]
     df_mins = [df.min().min() for df in dfs]
     df_maxes = [df.max().max() for df in dfs]
-    if 'decadal' in args.metrics_file_base:
+    if 'decadal' in args.metrics_file_base or 'dms' in args.metrics_file_base:
         d1_dt, d2_dt = degree_df.index.values
         figure, axes = plt.subplots(2, len(metric_names), layout='compressed')
         for i, (df, df_min, df_max, metric_name) in enumerate(zip(dfs, df_mins, df_maxes, metric_names)):
@@ -69,7 +72,7 @@ def main():
             scatter_map(axis, mx, my, df.loc[d1_dt], cb_fs=label_size,
                 cb_min=PLOT_SCALES[metric_name][0] if args.common_scales else df_min,
                 cb_max=PLOT_SCALES[metric_name][1] if args.common_scales else df_max,
-                size_func=lambda series: 100 if args.output_folder else 20)
+                size_func=lambda x: 100 if args.output_folder else 20)
             axis.set_title(f'decade 1: {metric_name}')
 
             axis = axes[1, i]
@@ -78,7 +81,7 @@ def main():
             scatter_map(axis, mx, my, df.loc[d2_dt], cb_fs=label_size,
                 cb_min=PLOT_SCALES[metric_name][0] if args.common_scales else df_min,
                 cb_max=PLOT_SCALES[metric_name][1] if args.common_scales else df_max,
-                size_func=lambda series: 100 if args.output_folder else 20)
+                size_func=lambda x: 100 if args.output_folder else 20)
             axis.set_title(f'decade 2: {metric_name}')
         show_or_save(figure, f'{args.metrics_file_base}_decadal.png')
 
@@ -90,7 +93,7 @@ def main():
             mx, my = _map(lons, lats)
             series_diff = df.loc[d2_dt] - df.loc[d1_dt]
             scatter_map(axis, mx, my, series_diff, cb_fs=label_size, cmap='RdYlBu_r',
-                size_func=lambda series: 100 if args.output_folder else 20)
+                size_func=lambda x: 100 if args.output_folder else 20)
             axis.set_title(metric_name)
         show_or_save(figure, f'{args.metrics_file_base}_decadal_diff.png')
     else:
@@ -113,7 +116,7 @@ def main():
                 mx, my = _map(lons, lats)
                 series = df.loc[dt]
                 scatter_map(axis, mx, my, series, cb_min=df_min, cb_max=df_max, cb_fs=label_size,
-                    size_func=lambda series: 100 if args.output_folder else 20)
+                    size_func=lambda x: 100 if args.output_folder else 20)
                 axis.set_title(f'{pd.to_datetime(dt).strftime("%b %Y")}: {metric_name}')
             show_or_save(figure, f'{args.metrics_file_base}_{pd.to_datetime(dt).strftime("%Y_%m")}.png')
 

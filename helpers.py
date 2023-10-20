@@ -69,7 +69,7 @@ def link_str_to_adjacency(link_str_df: pd.DataFrame, edge_density=None,
         threshold=None, lag_bool_df=None, col_quantile=None):
     adjacency = link_str_df * 0 + 1
     if edge_density:
-        threshold = np.quantile(link_str_df, 1 - edge_density)
+        threshold = np.nanquantile(link_str_df, 1 - edge_density)
         print(f'Fixed edge density {edge_density} gives threshold {threshold}')
         # Only sensible for an n x m link_str_df
         if col_quantile and not link_str_df.index.equals(link_str_df.columns):
@@ -78,7 +78,7 @@ def link_str_to_adjacency(link_str_df: pd.DataFrame, edge_density=None,
             adjacency = link_str_df.apply(lambda row: \
                 np.where(row > thresholds.loc[row.name], 1, 0), axis=0)
     if lag_bool_df is not None:
-        current_lag_threshold = np.quantile(link_str_df * lag_bool_df, 1 - edge_density)
+        current_lag_threshold = np.nanquantile(link_str_df * lag_bool_df, 1 - edge_density)
         print('Number of links:', lag_bool_df.sum().sum())
         print('Link strength mean:', round((link_str_df * lag_bool_df).sum().sum() / lag_bool_df.sum().sum(), 4))
         print(f'Link strength {1 - edge_density} quantile:', round(current_lag_threshold, 4))

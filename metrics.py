@@ -87,7 +87,7 @@ def main():
 
     # First, read in one of the target link strength files to get the
     # location and time indices for initialising the arrays of metrics
-    if 'decadal' in args.link_str_file_tag:
+    if 'decadal' in args.link_str_file_tag or 'dms' in args.link_str_file_tag:
         link_str_df = read_link_str_df(
             f'{args.data_dir}/link_str_{args.link_str_file_tag}_d1.{args.fmt}')
     elif args.month:
@@ -194,7 +194,7 @@ def main():
         print(f'{date_summary}: {len(louvain_partitions)} louvain_partitions')
         print(f'{date_summary}: graph metrics calculated; time elapsed: {datetime.now() - start}')
         
-    if 'decadal' in args.link_str_file_tag:
+    if 'decadal' in args.link_str_file_tag or 'dms' in args.link_str_file_tag:
         calculate_metrics(DECADE_END_DATES[0], read_link_str_df(
             f'{args.data_dir}/link_str_{args.link_str_file_tag}_d1.{args.fmt}'))
         calculate_metrics(DECADE_END_DATES[1], read_link_str_df(

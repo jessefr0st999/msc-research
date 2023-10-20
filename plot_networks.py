@@ -2,7 +2,6 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import argparse
 
-import pandas as pd
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -13,7 +12,7 @@ from helpers import get_map, configure_plots, read_link_str_df, \
 YEARS = list(range(2000, 2022 + 1))
 MONTHS = list(range(1, 13))
 OUTPUTS_DIR = 'data/outputs'
-LOCATIONS_FILE = f'data/precipitation/Fused.Locations.csv'
+LOCATIONS_FILE = 'data/precipitation/Fused.Locations.csv'
 
 def network_map(axis, link_str_df, edge_density=None, threshold=None,
         map_region='aus', lag_bool_df=None, col_quantile=False):
@@ -27,12 +26,12 @@ def network_map(axis, link_str_df, edge_density=None, threshold=None,
     pos = {}
     for i, elem in enumerate(adjacency.index):
         pos[elem] = (map_x[i], map_y[i])
-    node_sizes = [25 if adjacency[location].sum() else 0 for location in graph.nodes()]
+    node_sizes = [20 if adjacency[location].sum() else 0 for location in graph.nodes()]
     # node_sizes = [3 for _ in graph.nodes()]
     nx.draw_networkx_nodes(ax=axis, G=graph, pos=pos, nodelist=graph.nodes(),
         node_color='r', alpha=0.8, node_size=node_sizes)
     nx.draw_networkx_edges(ax=axis, G=graph, pos=pos, edge_color='g',
-        alpha=0.5, arrows=False)
+        alpha=0.3, arrows=False)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -62,7 +61,8 @@ def main():
         'threshold': args.link_str_threshold,
         'col_quantile': args.col_quantile,
     }
-    if 'decadal' in args.link_str_file_tag:
+    if 'decadal' in args.link_str_file_tag or 'dms' in args.link_str_file_tag:
+        # figure, axes = plt.subplots(2, 1, layout='compressed')
         figure, axes = plt.subplots(1, 2, layout='compressed')
         axes = iter(axes.flatten())
 

@@ -13,13 +13,15 @@ FUSED_DAILY_PATH = 'data/fused_upsampled'
 # NSRP_DATASET = False
 NSRP_DATASET = True
 X_DF_NAME = 'x_df_nsrp.csv' if NSRP_DATASET else 'x_df.csv'
-PREC_INC = 0.5
-DF_QUANTILES = [0.05, 0.95]
-# DF_QUANTILES = [0.1, 0.9]
-# MONTH_QUANTILES = [0.05, 0.95]
-MONTH_QUANTILES = [0.1, 0.9]
-# LOC_QUANTILES = [0.1, 0.9]
-LOC_QUANTILES = [0.05, 0.95]
+PREC_INC = 0.2
+
+# DF_QUANTILES = [0.05, 0.95]
+# MONTH_QUANTILES = [0.1, 0.9]
+# LOC_QUANTILES = [0.05, 0.95]
+
+DF_QUANTILES = [0.2, 0.8]
+MONTH_QUANTILES = [0.2, 0.8]
+LOC_QUANTILES = [0.015, 0.985]
 
 # x_df = None
 # i = 0
@@ -63,25 +65,27 @@ def cq_extremes(df_slice, quantile):
 extreme_lower_by_loc = cq_extremes(x_df, LOC_QUANTILES[0])
 extreme_upper_by_loc = cq_extremes(x_df, LOC_QUANTILES[1])
 
-extreme_lower_by_month = x_df.copy()
-extreme_upper_by_month = x_df.copy()
-for month in range(1, 13):
-    x_m = x_df.loc[[dt.month == month for dt in x_df.index], :]
-    month_lower_q = np.nanquantile(x_m, MONTH_QUANTILES[0])
-    month_upper_q = np.nanquantile(x_m, MONTH_QUANTILES[1])
-    extreme_lower_by_month.loc[[dt.month == month for dt in x_df.index], :] = \
-        (x_df < month_lower_q).fillna(0).astype(bool)
-    extreme_upper_by_month.loc[[dt.month == month for dt in x_df.index], :] = \
-        (x_df > month_upper_q).fillna(0).astype(bool)
+# extreme_lower_by_month = x_df.copy()
+# extreme_upper_by_month = x_df.copy()
+# for month in range(1, 13):
+#     x_m = x_df.loc[[dt.month == month for dt in x_df.index], :]
+#     month_lower_q = np.nanquantile(x_m, MONTH_QUANTILES[0])
+#     month_upper_q = np.nanquantile(x_m, MONTH_QUANTILES[1])
+#     extreme_lower_by_month.loc[[dt.month == month for dt in x_df.index], :] = \
+#         (x_df < month_lower_q).fillna(0).astype(bool)
+#     extreme_upper_by_month.loc[[dt.month == month for dt in x_df.index], :] = \
+#         (x_df > month_upper_q).fillna(0).astype(bool)
 
 print('extreme_lower_by_df', extreme_lower_by_df.sum().sum())
 print('extreme_lower_by_loc', extreme_lower_by_loc.sum().sum())
-print('extreme_lower_by_month', extreme_lower_by_month.sum().sum())
+# print('extreme_lower_by_month', extreme_lower_by_month.sum().sum())
 print('extreme_upper_by_df', extreme_upper_by_df.sum().sum())
 print('extreme_upper_by_loc', extreme_upper_by_loc.sum().sum())
-print('extreme_upper_by_month', extreme_upper_by_month.sum().sum())
-extreme_lower = extreme_lower_by_df & extreme_lower_by_loc & extreme_lower_by_month
-extreme_upper = extreme_upper_by_df & extreme_upper_by_loc & extreme_upper_by_month
+# print('extreme_upper_by_month', extreme_upper_by_month.sum().sum())
+# extreme_lower = extreme_lower_by_df & extreme_lower_by_loc & extreme_lower_by_month
+# extreme_upper = extreme_upper_by_df & extreme_upper_by_loc & extreme_upper_by_month
+extreme_lower = extreme_lower_by_df & extreme_lower_by_loc
+extreme_upper = extreme_upper_by_df & extreme_upper_by_loc
 print('extreme_lower combined', extreme_lower.sum().sum())
 print('extreme_upper combined', extreme_upper.sum().sum())
 
@@ -91,24 +95,45 @@ extreme_lower_quantiles = extreme_lower_counts / x_df.count(axis=0)
 extreme_upper_quantiles = 1 - extreme_upper_counts / x_df.count(axis=0)
 
 suffix = 'nsrp' if NSRP_DATASET else 'orig'
-extreme_lower_quantiles.to_csv(f'x_lower_quantiles_{suffix}.csv')
-extreme_upper_quantiles.to_csv(f'x_upper_quantiles_{suffix}.csv')
+# extreme_lower_quantiles.to_csv(f'x_lower_quantiles_{suffix}.csv')
+# extreme_upper_quantiles.to_csv(f'x_upper_quantiles_{suffix}.csv')
 
-figure, axes = plt.subplots(1, 2)
+figure, axes = plt.subplots(2, 2, layout='compressed')
 axes = iter(axes.flatten())
 axis = next(axes)
 _map = get_map(axis)
 lats, lons = list(zip(*[ast.literal_eval(c) for c in x_df.columns]))
 mx, my = _map(lons, lats)
-scatter_map(axis, mx, my, extreme_lower_counts,
-    cb_min=0, cb_max=extreme_lower_counts.max())
+scatter_map(axis, mx, my, extreme_lower_quantiles,
+    cb_min=0, cb_max=extreme_lower_quantiles.max())
 axis.set_title(f'extreme low (df q = {DF_QUANTILES[0]}, '
     f'month q = {MONTH_QUANTILES[0]}, loc q = {LOC_QUANTILES[0]})')
 
 axis = next(axes)
 _map = get_map(axis)
-scatter_map(axis, mx, my, extreme_upper_counts,
-    cb_min=0, cb_max=extreme_upper_counts.max())
+scatter_map(axis, mx, my, extreme_upper_quantiles,
+    cb_min=0, cb_max=extreme_upper_quantiles.max())
 axis.set_title(f'extreme high (df q = {DF_QUANTILES[1]}, '
+    f'month q = {MONTH_QUANTILES[1]}, loc q = {LOC_QUANTILES[1]})')
+
+x_inf_list = np.zeros(x_df.shape[1])
+x_sup_list = np.zeros(x_df.shape[1])
+for i in range(x_df.shape[1]):
+    x_inf_list[i] = np.nanquantile(x_df.iloc[:, i], extreme_lower_quantiles[i])
+    x_sup_list[i] = np.nanquantile(x_df.iloc[:, i], extreme_upper_quantiles[i])
+    
+axis = next(axes)
+_map = get_map(axis)
+mx, my = _map(lons, lats)
+scatter_map(axis, mx, my, x_inf_list,
+    cb_min=x_inf_list.min(), cb_max=x_inf_list.max())
+axis.set_title(f'x_inf (df q = {DF_QUANTILES[0]}, '
+    f'month q = {MONTH_QUANTILES[0]}, loc q = {LOC_QUANTILES[0]})')
+
+axis = next(axes)
+_map = get_map(axis)
+scatter_map(axis, mx, my, x_sup_list,
+    cb_min=x_sup_list.min(), cb_max=x_sup_list.max())
+axis.set_title(f'x_sup (df q = {DF_QUANTILES[1]}, '
     f'month q = {MONTH_QUANTILES[1]}, loc q = {LOC_QUANTILES[1]})')
 plt.show()

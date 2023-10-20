@@ -23,7 +23,7 @@ def main():
     map_region = file_region_type(args.link_str_file)
     link_str_df = read_link_str_df(f'{args.data_dir}/{args.link_str_file}')
     try:
-        if 'decadal' in args.link_str_file:
+        if 'decadal' in args.link_str_file or 'dms' in args.link_str_file:
             date = datetime(2011, 4, 1) if 'd1' in args.link_str_file \
                 else datetime(2022, 3, 1)
             year = date.year
@@ -109,10 +109,10 @@ def main():
             lv_node_colours, lp_node_colours]):
         nx.draw_networkx_nodes(G=lcc_graph, pos=pos, nodelist=lcc_graph.nodes(),
             node_color=colours, alpha=0.8, ax=axis,
-            node_size=400 if 'geo_agg' in args.link_str_file else 80)
+            node_size=80)
         nx.draw_networkx_edges(G=lcc_graph, pos=pos, edge_color='gray',
             alpha=0.2, arrows=False, ax=axis,
-            width=2 if 'geo_agg' in args.link_str_file else 1)
+            width=1)
     filename = (f'communities_ed_{str(args.edge_density).replace(".", "p")}'
         f'_{args.link_str_file.split("link_str_")[1].split(".csv")[0]}.png')
     show_or_save(figure, filename)

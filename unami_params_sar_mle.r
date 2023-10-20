@@ -12,20 +12,23 @@ library(coda)
 library(modeest)
 library(msos)
 
-# beta_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_beta_coeffs_orig.csv'
-# kappa_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_kappa_coeffs_orig.csv'
-# psi_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_psi_coeffs_orig.csv'
-beta_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_beta_coeffs_nsrp.csv'
-kappa_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_kappa_coeffs_nsrp.csv'
-psi_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_psi_coeffs_nsrp.csv'
+beta_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_beta_coeffs_nsrp_d2.csv'
+kappa_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_kappa_coeffs_nsrp_d2.csv'
+psi_coeffs_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_psi_coeffs_nsrp_d2.csv'
+x_inf_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_x_inf_nsrp_d2.csv'
+x_sup_file = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\array_x_sup_nsrp_d2.csv'
 
 beta_df = read.csv(beta_coeffs_file, header=F)
 kappa_df = read.csv(kappa_coeffs_file, header=F)
 psi_df = read.csv(psi_coeffs_file, header=F)
+x_inf_df = read.csv(x_inf_file, header=F)
+x_sup_df = read.csv(x_sup_file, header=F)
 locations = as.matrix(beta_df[, 1 : 2])
 beta_df =  as.matrix(beta_df[, -1 : -2])
 kappa_df =  as.matrix(kappa_df[, -1 : -2])
 psi_df =  as.matrix(psi_df[, -1 : -2])
+x_inf_df =  x_inf_df[, -1 : -2]
+x_sup_df =  x_sup_df[, -1 : -2]
 
 # Switch locations matrix column order for distance function
 lats = locations[, 1]
@@ -82,6 +85,16 @@ for (j in 1 : length(colnames(psi_df))) {
     as.vector(moran.test(psi_df[, j], weights_listw) $ estimate)[1]
   ))
 }
+print('x_inf:')
+print(c(
+  autocor(x_inf_df, weights, 'moran'),
+  as.vector(moran.test(x_inf_df, weights_listw) $ estimate)[1]
+))
+print('x_sup:')
+print(c(
+  autocor(x_sup_df, weights, 'moran'),
+  as.vector(moran.test(x_sup_df, weights_listw) $ estimate)[1]
+))
 
 W = weights
 A_func = function(rho, n) {
@@ -144,33 +157,35 @@ print('beta:')
 for (i in 1 : 7) {
   print(i)
   rho = find_rho_mle(beta_df[, i])
-  # rho = find_rho_mle(beta_df[, i], seq(0.9, 1.1, 0.01))
-  # sigma = find_sigma_mle(beta_df[, i], rho_prec)
   beta_corrected_df[, i] = rho * W %*% beta_df[, i]
 }
 print('kappa:')
 for (i in 1 : 5) {
   print(i)
   rho = find_rho_mle(kappa_df[, i])
-  # rho = find_rho_mle(kappa_df[, i], seq(0.9, 1.1, 0.01))
-  # sigma = find_sigma_mle(kappa_df[, i], rho_prec)
   kappa_corrected_df[, i] = rho * W %*% kappa_df[, i]
 }
 print('psi:')
 for (i in 1 : 15) {
   print(i)
   rho = find_rho_mle(psi_df[, i])
-  # rho = find_rho_mle(psi_df[, i], seq(0.9, 1.1, 0.01))
-  # sigma = find_sigma_mle(psi_df[, i], rho_prec)
   psi_corrected_df[, i] = rho * W %*% psi_df[, i]
 }
+print('x_inf:')
+rho = find_rho_mle(x_inf_df)
+x_inf_corrected_df = rho * W %*% x_inf_df
+print('x_sup:')
+rho = find_rho_mle(x_sup_df)
+x_sup_corrected_df = rho * W %*% x_sup_df
 
-# beta_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_beta_coeffs_orig.csv'
-# kappa_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_kappa_coeffs_orig.csv'
-# psi_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_psi_coeffs_orig.csv'
-beta_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_beta_coeffs_nsrp.csv'
-kappa_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_kappa_coeffs_nsrp.csv'
-psi_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_psi_coeffs_nsrp.csv'
+beta_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_beta_coeffs_nsrp_d2.csv'
+kappa_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_kappa_coeffs_nsrp_d2.csv'
+psi_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_psi_coeffs_nsrp_d2.csv'
+x_inf_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_x_inf_nsrp_d2.csv'
+x_sup_output_csv = 'C:\\Users\\Jesse Frost\\Documents\\GitHub\\msc-research\\corrected_x_sup_nsrp_d2.csv'
+
 write.csv(beta_corrected_df, beta_output_csv, row.names=FALSE)
 write.csv(kappa_corrected_df, kappa_output_csv, row.names=FALSE)
 write.csv(psi_corrected_df, psi_output_csv, row.names=FALSE)
+write.csv(x_inf_corrected_df, x_inf_output_csv, row.names=FALSE)
+write.csv(x_sup_corrected_df, x_sup_output_csv, row.names=FALSE)

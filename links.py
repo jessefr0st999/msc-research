@@ -16,7 +16,6 @@ LINK_STR_METHOD = 'max'
 DATA_DIR = 'data/precipitation'
 PREC_FILE = f'{DATA_DIR}/FusedData.csv'
 LOCATIONS_FILE = f'{DATA_DIR}/Fused.Locations.csv'
-GEO_AGG_PREC_FILE = f'{DATA_DIR}/prec_df_agg.pkl'
 
 def aggregate_lagged_corrs(array: np.array, method):
     if method == 'max':
@@ -96,55 +95,37 @@ def main():
     parser.add_argument('--method', default='pearson')
     parser.add_argument('--avg_lookback_months', '--alm', type=int, default=60)
     parser.add_argument('--lag_months', '--lag', type=int, default=0)
-    parser.add_argument('--link_str_geo_penalty', type=float, default=0)
-    parser.add_argument('--deseasonalise', action='store_true', default=False)
-    parser.add_argument('--geo_agg', action='store_true', default=False)
     # Build networks for each decade, with lookback over all months in the decade
     parser.add_argument('--decadal', action='store_true', default=False)
     # Build networks timestamped only from a given month (generally March)
     parser.add_argument('--month', type=int, default=None)
     # Build networks for a given month, comparing only that month in other years
     parser.add_argument('--month_only', type=int, default=None)
-    # Build networks for each decade, correlating each month with that of prior years
-    parser.add_argument('--decadal_yearly', action='store_true', default=False)
+    # Build networks for each decade, correlating each calendar month with that of prior years
+    parser.add_argument('--dms', action='store_true', default=False)
     parser.add_argument('--season', default=None)
     # NOTE: This should not be used with lag
     parser.add_argument('--exp_kernel', type=float, default=None)
-
     args = parser.parse_args()
 
-    if args.decadal or args.decadal_yearly:
+    if args.decadal:
         base_file = 'decadal'
+    elif args.dms:
+        base_file = 'dms'
     else:
         base_file = f'alm_{args.avg_lookback_months}'
     if args.month_only:
         month_str = str(args.month_only) if args.month_only >= 10 else f'0{args.month_only}'
         base_file += f'_m{month_str}'
-    base_file += '_geo_agg' if args.geo_agg else ''
-    base_file += '_des' if args.deseasonalise else ''
     base_links_file = base_file
-    if args.decadal_yearly:
-        base_links_file += '_yearly'
-        if args.season:
-            base_links_file += f'_{args.season}'
+    if args.dms and args.season:
+        base_links_file += f'_{args.season}'
     if args.method != 'pearson':
         base_links_file += f'_{args.method}'
     base_links_file += f'_lag_{args.lag_months}'
-    if not (args.decadal or args.decadal_yearly):
+    if not (args.decadal or args.dms):
         base_file += f'_lag_{args.lag_months}'
-
     prec_seq_file = f'{DATA_DIR}/seq_prec_{base_file}.pkl'
-
-    # TODO: improve this
-    # def deseasonalise(df):
-    #     def row_func(row: pd.Series):
-    #         datetime_index = pd.DatetimeIndex(row.index)
-    #         for m in months:
-    #             month_series = row.loc[datetime_index.month == m]
-    #             row.loc[datetime_index.month == m] = \
-    #                 (month_series.values - month_series.mean()) / month_series.std()
-    #         return row
-    #     return df.apply(row_func, axis=1)
 
     def exp_kernel(seq, k):
         # k is the factor by which the start of the sequence is multiplied
@@ -155,22 +136,17 @@ def main():
         return seq * exp_seq
 
     def prepare_prec_df():
-        if args.geo_agg:
-            df = pd.read_pickle(GEO_AGG_PREC_FILE).T
-        else:
-            raw_df = pd.read_csv(PREC_FILE)
-            raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')
-            locations_df = pd.read_csv(LOCATIONS_FILE)
-            df = pd.concat([locations_df, raw_df], axis=1)
-            df = df.set_index(['Lat', 'Lon'])
+        raw_df = pd.read_csv(PREC_FILE)
+        raw_df.columns = pd.to_datetime(raw_df.columns, format='D%Y.%m')
+        locations_df = pd.read_csv(LOCATIONS_FILE)
+        df = pd.concat([locations_df, raw_df], axis=1)
+        df = df.set_index(['Lat', 'Lon'])
         if args.month_only:
             df = df.loc[:, [c.month == args.month_only for c in df.columns]]
-        # if args.deseasonalise:
-        #     df = deseasonalise(df)
         def seq_func(row: pd.Series):
             # Place the value at the current timestamp at the start of list
             # Values hence decrease in time as the sequence progresses
-            if args.decadal or args.decadal_yearly:
+            if args.decadal or args.dms:
                 start_dates = [datetime(2000, 4, 1), datetime(2011, 4, 1)]
                 end_dates = [datetime(2011, 3, 1), datetime(2022, 3, 1)]
                 def func(start_date, end_date, r: pd.Series):
@@ -204,19 +180,14 @@ def main():
         df = df.apply(seq_func, axis=1)       
         print(f'Sequences constructed; time elapsed: {datetime.now() - start}')
         return df.T
+    prec_df = prepare_prec_df()
 
-    if Path(prec_seq_file).is_file():
-        print(f'Reading precipitation sequences from pickle file {prec_seq_file}')
-        prec_df: pd.DataFrame = pd.read_pickle(prec_seq_file)
-    else:
-        print(f'Calculating precipitation sequences and saving to pickle file {prec_seq_file}')
-        prec_df = prepare_prec_df()
-        prec_df.to_pickle(prec_seq_file)
-
-    if args.decadal or args.decadal_yearly:
+    if args.decadal or args.dms:
         d1_series = prec_df.loc[prec_df.index[0]]
         d2_series = prec_df.loc[prec_df.index[1]]
-        if args.decadal_yearly:
+        # TODO: change seasonal to only calculate for the given season; this will
+        # heavily optimise the calculation for the regression gradient method
+        if args.dms:
             def _agg(array):
                 if args.season == 'summer':
                     # Trick to get the entries with indices 0, 1, 11 in once slice
@@ -234,18 +205,13 @@ def main():
             d1_link_str_array = np.zeros((len(d1_series.index), len(d1_series.index), 12))
             d2_link_str_array = np.zeros((len(d2_series.index), len(d2_series.index), 12))
             for m in range(1, 12 + 1):
-                d1_indices = []
-                d2_indices = []
+                indices = []
                 for i in range(len(d1_series.iloc[0])):
-                    # Decade 1 series ends in March (first element of its sequence)
+                    # Each decadal series ends in March (first element of its sequence)
                     if i % 12 == (m - 3) % 12:
-                        d1_indices.append(i)
-                for i in range(len(d2_series.iloc[0])):
-                    # Decade 2 series ends in April (first element of its sequence)
-                    if i % 12 == (m - 4) % 12:
-                        d2_indices.append(i)
-                d1_series_m = d1_series.apply(lambda seq: np.array(seq)[d1_indices])
-                d2_series_m = d2_series.apply(lambda seq: np.array(seq)[d2_indices])
+                        indices.append(i)
+                d1_series_m = d1_series.apply(lambda seq: np.array(seq)[indices])
+                d2_series_m = d2_series.apply(lambda seq: np.array(seq)[indices])
                 d1_link_str_df_m, d1_max_lags = build_link_str_df_uv(d1_series_m,
                     method=args.method)
                 d2_link_str_df_m, d2_max_lags = build_link_str_df_uv(d2_series_m,
@@ -285,8 +251,6 @@ def main():
                 except KeyError:
                     continue
                 links_file = (f'{DATA_DIR}/link_str_corr_{base_links_file}')
-                if args.link_str_geo_penalty:
-                    links_file += f'_geo_pen_{str(int(1 / args.link_str_geo_penalty))}'
                 links_file += f'_{dt.strftime("%Y")}' if args.month else f'_{dt.strftime("%Y_%m")}'
                 date_summary = f'{dt.year}, {dt.strftime("%b")}'
                 print(f'\n{date_summary}: calculating link strength data...')

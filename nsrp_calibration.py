@@ -7,11 +7,10 @@ import pickle
 
 import pandas as pd
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import scipy
 
-from helpers import get_map, scatter_map, configure_plots
+from helpers import get_map, scatter_map
 from upsample_nsrp import simulate_nsrp
 
 BOM_DAILY_PATH = 'data_unfused/bom_daily'
@@ -77,10 +76,13 @@ def main():
     # Select random files (each corresponding to a location) from the BOM daily dataset
     info_df = pd.read_csv('bom_info.csv', index_col=0, converters={0: ast.literal_eval})
     filenames = set(info_df.sample(args.num_samples)['filename']) if args.num_samples else None
-    for path in os.scandir(BOM_DAILY_PATH):
+    # for path in os.scandir(BOM_DAILY_PATH):
+    for i, name in enumerate(info_df['filename']):
+        if i % 100 == 0:
+            print(i)
         if not path.is_file() or (args.num_samples and path.name not in filenames):
             continue
-        prec_df = pd.read_csv(f'{BOM_DAILY_PATH}/{path.name}')
+        prec_df = pd.read_csv(f'{BOM_DAILY_PATH}/{name}')
         prec_df = prec_df.dropna(subset=['Rain'])
         prec_df.index = pd.DatetimeIndex(prec_df['Date'])
         loc = (-prec_df.iloc[0]['Lat'], prec_df.iloc[0]['Lon'])
